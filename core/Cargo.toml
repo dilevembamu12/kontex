@@ -14,7 +14,7 @@ authors = ["dilevembamu12"]
 [lib]
 name = "kontex_ttc"
 path = "src/lib.rs"
-crate-type = ["lib"]
+crate-type = ["cdylib", "lib"]
 
 [[bench]]
 name = "web_benchmark"
