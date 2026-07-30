@@ -33,7 +33,7 @@ function tryLoadNative() {
   nativeLoadAttempted = true;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('../../../../core/npm/index.js');
+    const mod = require('../../../core/npm/index.js');
     nativeWeb = new mod.JsWeb();
     console.log('[KontEx::TTC] Module natif Rust chargé ✓');
   } catch {
