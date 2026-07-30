@@ -16,7 +16,7 @@ export async function detectHallucination(request: Request, response: Response, 
       return;
     }
 
-    const report = ttcService.detectHallucination(content);
+    const report = await ttcService.detectHallucination(content);
     response.json(report);
   } catch (error: unknown) {
     next(error);
@@ -40,7 +40,7 @@ export async function propagateContext(request: Request, response: Response, nex
       return;
     }
 
-    const result = ttcService.propagateContext(sourceId, threshold ?? 0.01, maxDepth ?? 10);
+    const result = await ttcService.propagateContext(sourceId, threshold ?? 0.01, maxDepth ?? 10);
     response.json(result);
   } catch (error: unknown) {
     next(error);
@@ -53,7 +53,7 @@ export async function propagateContext(request: Request, response: Response, nex
  */
 export async function getStats(_request: Request, response: Response, next: NextFunction): Promise<void> {
   try {
-    const stats = ttcService.getStats();
+    const stats = await ttcService.getStats();
     response.json(stats);
   } catch (error: unknown) {
     next(error);

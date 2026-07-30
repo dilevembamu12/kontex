@@ -12,16 +12,16 @@ type PropagResult = { sourceId: string; reachedCount: number; maxDepth: number; 
 type StatsResult = { nodeCount: number; linkCount: number; anchoredCount: number; anchoringRate: number; contradictionCount: number; globalEntropy: number };
 
 export interface TtcEngine {
-  addNode(kind: string, content: string, weight: number, ambiguity: number, anchors: AnchorInput[]): string;
-  getNode(id: string): Record<string, unknown> | undefined;
-  listNodes(): Record<string, unknown>[];
-  addLink(sourceId: string, targetId: string, relation: string, weight: number, relevanceScore: number): string;
-  verifyAnchoring(nodeId: string): VerifResult;
-  detectContradiction(content: string): ContradictionResult;
-  propagateContext(sourceId: string, threshold?: number, maxDepth?: number): PropagResult;
-  resolveContradiction(nodeA: string, nodeB: string): string;
-  minimizeEntropy(maxIterations?: number): number;
-  getStats(): StatsResult;
+  addNode(kind: string, content: string, weight: number, ambiguity: number, anchors: AnchorInput[]): Promise<string>;
+  getNode(id: string): Promise<Record<string, unknown> | undefined>;
+  listNodes(): Promise<Record<string, unknown>[]>;
+  addLink(sourceId: string, targetId: string, relation: string, weight: number, relevanceScore: number): Promise<string>;
+  verifyAnchoring(nodeId: string): Promise<VerifResult>;
+  detectContradiction(content: string): Promise<ContradictionResult>;
+  propagateContext(sourceId: string, threshold?: number, maxDepth?: number): Promise<PropagResult>;
+  resolveContradiction(nodeA: string, nodeB: string): Promise<string>;
+  minimizeEntropy(maxIterations?: number): Promise<number>;
+  getStats(): Promise<StatsResult>;
 }
 
 // Module natif (chargé paresseusement)
@@ -68,10 +68,9 @@ export function createTtcEngine(): TtcEngine {
 
   // Fallback TypeScript
   return {
-    addNode(kind, content, weight, ambiguity, anchors) {
-      const node = fallbackService.addNode({
-        kind: kind as 'fact' | 'rule' | 'code' | 'documentation',
-        content, weight, ambiguity,
+    async addNode(kind: string, content: string, weight: number, ambiguity: number, anchors: AnchorInput[]) {
+      const node = await fallbackService.addNode({
+        kind: kind as 'fact' | 'rule' | 'code' | 'documentation', content, weight, ambiguity,
         anchors: anchors.map((a) => ({
           uri: a.uri,
           sourceType: a.sourceType as 'official_documentation' | 'test_case' | 'specification' | 'code_repository' | 'peer_review' | 'other',
@@ -79,37 +78,41 @@ export function createTtcEngine(): TtcEngine {
       });
       return node.id;
     },
-    getNode(id) { return fallbackService.getNode(id) as unknown as Record<string, unknown> | undefined; },
-    listNodes() { return fallbackService.listNodes() as unknown as Record<string, unknown>[]; },
-    addLink(sourceId, targetId, relation, weight, relevanceScore) {
-      const link = fallbackService.addLink({
+    async getNode(id: string) {
+      const node = await fallbackService.getNode(id);
+      return node as unknown as Record<string, unknown> | undefined;
+    },
+    async listNodes() {
+      const nodes = await fallbackService.listNodes();
+      return nodes as unknown as Record<string, unknown>[];
+    },
+    async addLink(sourceId: string, targetId: string, relation: string, weight: number, relevanceScore: number) {
+      const link = await fallbackService.addLink({
         sourceId, targetId,
         relation: relation as 'depends_on' | 'contradicts' | 'refines' | 'exemplifies' | 'references' | 'custom',
         weight, relevanceScore,
       });
       return link.id;
     },
-    verifyAnchoring(nodeId) {
-      const v = fallbackService.verifyAnchoring(nodeId);
-      return { ...v, missingCategories: [...v.missingCategories] };
+    async verifyAnchoring(nodeId: string) {
+      const v = await fallbackService.verifyAnchoring(nodeId);
+      return { ...v, missingCategories: [...v.missingCategories] } as VerifResult;
     },
-    detectContradiction(content) {
-      const r = fallbackService.detectContradictions(content);
-      return { ...r, contradictions: [...r.contradictions] };
+    async detectContradiction(content: string) {
+      const r = await fallbackService.detectContradictions(content);
+      return { ...r, contradictions: [...r.contradictions] } as ContradictionResult;
     },
-    propagateContext(sourceId, threshold = 0.01, maxDepth = 10) {
-      const r = fallbackService.propagateContext(sourceId, threshold, maxDepth);
+    async propagateContext(sourceId: string, threshold = 0.01, maxDepth = 10) {
+      const r = await fallbackService.propagateContext(sourceId, threshold, maxDepth);
       return {
-        sourceId: r.sourceId,
-        reachedCount: r.reachedCount,
-        maxDepth: r.maxDepth,
+        sourceId: r.sourceId, reachedCount: r.reachedCount, maxDepth: r.maxDepth,
         nodes: [...r.reachedNodes.entries()].map(([nodeId, score]) => ({ nodeId, score })),
-      };
+      } as PropagResult;
     },
-    resolveContradiction(nodeA, nodeB) {
+    async resolveContradiction(nodeA: string, nodeB: string) {
       return `Résolution: ${nodeA} ↔ ${nodeB} — utiliser POST /detect`;
     },
-    minimizeEntropy() { return 0; },
-    getStats() { return fallbackService.getStats(); },
+    async minimizeEntropy() { return 0; },
+    async getStats() { return fallbackService.getStats(); },
   };
 }

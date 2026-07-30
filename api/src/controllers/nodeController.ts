@@ -10,7 +10,7 @@ import { ttcService } from '../services/ttcService.js';
  */
 export async function createNode(request: Request, response: Response, next: NextFunction): Promise<void> {
   try {
-    const node = ttcService.addNode(request.body);
+    const node = await ttcService.addNode(request.body);
     response.status(201).json(node);
   } catch (error: unknown) {
     next(error);
@@ -23,7 +23,7 @@ export async function createNode(request: Request, response: Response, next: Nex
  */
 export async function listNodes(_request: Request, response: Response, next: NextFunction): Promise<void> {
   try {
-    const nodes = ttcService.listNodes();
+    const nodes = await ttcService.listNodes();
     response.json({ nodes, total: nodes.length });
   } catch (error: unknown) {
     next(error);
@@ -42,7 +42,7 @@ export async function getNode(request: Request, response: Response, next: NextFu
       return;
     }
 
-    const node = ttcService.getNode(id);
+    const node = await ttcService.getNode(id);
     if (!node) {
       response.status(404).json({ error: `Nœud ${id} introuvable` });
       return;
@@ -66,7 +66,7 @@ export async function verifyNode(request: Request, response: Response, next: Nex
       return;
     }
 
-    const verification = ttcService.verifyAnchoring(id);
+    const verification = await ttcService.verifyAnchoring(id);
     response.json(verification);
   } catch (error: unknown) {
     next(error);

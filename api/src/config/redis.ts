@@ -20,9 +20,9 @@ export interface RedisClient {
  */
 async function createRedisClient(): Promise<RedisClient> {
   try {
-    // @ts-expect-error — ioredis est optionnel, installé en production
     const RedisModule = await import('ioredis');
-    const Redis = RedisModule.default;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const Redis = (RedisModule as any).default;
 
     const redis = new Redis(environment.REDIS_URL, {
       maxRetriesPerRequest: 3,

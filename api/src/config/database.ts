@@ -21,10 +21,8 @@ export interface DatabaseClient {
 async function createPostgresClient(): Promise<DatabaseClient> {
   // Import dynamique pour éviter l'erreur si pg n'est pas installé
   try {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-expect-error — pg est optionnel, installé en production
     const pg = await import('pg');
-    const { Pool } = pg.default;
+    const { Pool } = pg.default as typeof import('pg');
 
     const pool = new Pool({
       connectionString: environment.DATABASE_URL,

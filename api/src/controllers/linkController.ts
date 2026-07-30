@@ -10,7 +10,7 @@ import { ttcService } from '../services/ttcService.js';
  */
 export async function createLink(request: Request, response: Response, next: NextFunction): Promise<void> {
   try {
-    const link = ttcService.addLink(request.body);
+    const link = await ttcService.addLink(request.body);
     response.status(201).json(link);
   } catch (error: unknown) {
     next(error);
@@ -23,7 +23,7 @@ export async function createLink(request: Request, response: Response, next: Nex
  */
 export async function listLinks(_request: Request, response: Response, next: NextFunction): Promise<void> {
   try {
-    const links = ttcService.listLinks();
+    const links = await ttcService.listLinks();
     response.json({ links, total: links.length });
   } catch (error: unknown) {
     next(error);

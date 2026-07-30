@@ -2,7 +2,7 @@
 /// Service TTC en TypeScript — logique métier de la toile contextuelle.
 ///
 /// En développement : stockage en mémoire (Map).
-/// En production : PostgreSQL + pgvector.
+/// En production : PostgreSQL + pgvector via repositories.
 ///
 /// # Principes TTC implémentés
 /// - A : ancrage obligatoire, force d'ancrage
@@ -10,7 +10,14 @@
 /// - P : propagation BFS pondérée
 /// - E_min : calcul d'entropie, minimisation
 
-import { randomUUID } from 'node:crypto';
+import {
+  InMemoryNodeRepository,
+  type NodeRepository,
+} from '../repositories/nodeRepository.js';
+import {
+  InMemoryLinkRepository,
+  type LinkRepository,
+} from '../repositories/linkRepository.js';
 
 // ============================================================
 // Types internes au service
@@ -94,11 +101,16 @@ export interface PropagationResult {
 // ============================================================
 
 export class TtcService {
-  private readonly nodes: Map<string, StoredNode> = new Map();
-  private readonly links: Map<string, StoredLink> = new Map();
-  // Index : nodeId → Set<linkId> pour les recherches rapides
+  private readonly nodeRepo: NodeRepository;
+  private readonly linkRepo: LinkRepository;
+  // Index mémoire pour les recherches rapides (propagation BFS)
   private readonly outgoingIndex: Map<string, Set<string>> = new Map();
   private readonly incomingIndex: Map<string, Set<string>> = new Map();
+
+  constructor(nodeRepo?: NodeRepository, linkRepo?: LinkRepository) {
+    this.nodeRepo = nodeRepo ?? new InMemoryNodeRepository();
+    this.linkRepo = linkRepo ?? new InMemoryLinkRepository();
+  }
 
   // ============================================================
   // CRUD Nœuds
@@ -108,7 +120,7 @@ export class TtcService {
    * Ajoute un nœud à la toile.
    * @throws Error si le Principe A est violé (pas d'ancres valides)
    */
-  addNode(input: ContextNodeInput): StoredNode {
+  async addNode(input: ContextNodeInput): Promise<StoredNode> {
     // Validation Principe A
     const validAnchors = input.anchors.filter((a) => this.isValidUri(a.uri));
     if (validAnchors.length === 0) {
@@ -116,37 +128,24 @@ export class TtcService {
         `Violation Principe A : le nœud "${input.content.slice(0, 60)}" n'a aucune ancre valide`,
       );
     }
-
-    const now = new Date().toISOString();
-    const node: StoredNode = {
-      id: randomUUID(),
-      kind: input.kind,
-      content: input.content,
-      weight: this.clamp(input.weight ?? 0.5, 0, 1),
-      ambiguity: this.clamp(input.ambiguity ?? 0.5, 0, 1),
-      anchors: validAnchors,
-      metadata: input.metadata ?? {},
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.nodes.set(node.id, node);
-    return node;
+    // Ajoute les ancres validées uniquement
+    return this.nodeRepo.create({ ...input, anchors: validAnchors });
   }
 
   /** Récupère un nœud par ID. */
-  getNode(id: string): StoredNode | undefined {
-    return this.nodes.get(id);
+  async getNode(id: string): Promise<StoredNode | undefined> {
+    const node = await this.nodeRepo.findById(id);
+    return node ?? undefined;
   }
 
   /** Liste tous les nœuds. */
-  listNodes(): StoredNode[] {
-    return [...this.nodes.values()];
+  async listNodes(): Promise<StoredNode[]> {
+    return this.nodeRepo.findAll();
   }
 
   /** Vérifie l'ancrage d'un nœud (Principe A). */
-  verifyAnchoring(nodeId: string): AnchorVerification {
-    const node = this.nodes.get(nodeId);
+  async verifyAnchoring(nodeId: string): Promise<AnchorVerification> {
+    const node = await this.nodeRepo.findById(nodeId);
     if (!node) {
       throw new Error(`Nœud ${nodeId} introuvable`);
     }
@@ -160,12 +159,21 @@ export class TtcService {
   }
 
   /** Vérifie l'ancrage de tous les nœuds. */
-  verifyAllAnchors(): Map<string, AnchorVerification> {
+  async verifyAllAnchors(): Promise<Map<string, AnchorVerification>> {
     const results = new Map<string, AnchorVerification>();
-    for (const [id] of this.nodes) {
-      results.set(id, this.verifyAnchoring(id));
+    const nodes = await this.nodeRepo.findAll();
+    for (const node of nodes) {
+      results.set(node.id, this.computeAnchorVerification(node));
     }
     return results;
+  }
+
+  private computeAnchorVerification(node: StoredNode): AnchorVerification {
+    const sourceCount = node.anchors.length;
+    const isAnchored = sourceCount > 0;
+    const strength = this.computeAnchorStrength(node.anchors);
+    const missingCategories = this.findMissingCategories(node.anchors, isAnchored);
+    return { isAnchored, strength, sourceCount, missingCategories };
   }
 
   // ============================================================
@@ -176,27 +184,19 @@ export class TtcService {
    * Ajoute un lien entre deux nœuds.
    * @throws Error si un des nœuds n'existe pas
    */
-  addLink(input: ContextLinkInput): StoredLink {
-    if (!this.nodes.has(input.sourceId)) {
+  async addLink(input: ContextLinkInput): Promise<StoredLink> {
+    const sourceExists = await this.nodeRepo.findById(input.sourceId);
+    const targetExists = await this.nodeRepo.findById(input.targetId);
+    if (!sourceExists) {
       throw new Error(`Nœud source ${input.sourceId} introuvable`);
     }
-    if (!this.nodes.has(input.targetId)) {
+    if (!targetExists) {
       throw new Error(`Nœud cible ${input.targetId} introuvable`);
     }
 
-    const link: StoredLink = {
-      id: randomUUID(),
-      sourceId: input.sourceId,
-      targetId: input.targetId,
-      relation: input.relation,
-      weight: this.clamp(input.weight ?? 0.5, 0, 1),
-      relevanceScore: this.clamp(input.relevanceScore ?? 0.5, 0, 1),
-      createdAt: new Date().toISOString(),
-    };
+    const link = await this.linkRepo.create(input);
 
-    this.links.set(link.id, link);
-
-    // Mise à jour des index
+    // Mise à jour des index mémoire pour le BFS
     if (!this.outgoingIndex.has(link.sourceId)) {
       this.outgoingIndex.set(link.sourceId, new Set());
     }
@@ -211,15 +211,13 @@ export class TtcService {
   }
 
   /** Récupère les liens sortants d'un nœud. */
-  getOutgoingLinks(nodeId: string): StoredLink[] {
-    const linkIds = this.outgoingIndex.get(nodeId);
-    if (!linkIds) return [];
-    return [...linkIds].map((id) => this.links.get(id)!).filter(Boolean);
+  async getOutgoingLinks(nodeId: string): Promise<StoredLink[]> {
+    return this.linkRepo.findBySourceId(nodeId);
   }
 
   /** Récupère tous les liens. */
-  listLinks(): StoredLink[] {
-    return [...this.links.values()];
+  async listLinks(): Promise<StoredLink[]> {
+    return this.linkRepo.findAll();
   }
 
   // ============================================================
@@ -230,19 +228,17 @@ export class TtcService {
    * Détecte les contradictions entre un nouveau contenu et la toile existante.
    * Compare via mots-clés + négations.
    */
-  detectContradictions(content: string): ContradictionReport {
+  async detectContradictions(content: string): Promise<ContradictionReport> {
     const contradictions: string[] = [];
     const keywords = this.extractKeywords(content);
     const hasNegation = this.hasNegation(content);
+    const allNodes = await this.nodeRepo.findAll();
 
-    for (const node of this.nodes.values()) {
+    for (const node of allNodes) {
       const nodeKeywords = this.extractKeywords(node.content);
       const commonKeywords = keywords.filter((kw) => nodeKeywords.includes(kw));
-
       if (commonKeywords.length === 0) continue;
-
       const nodeHasNegation = this.hasNegation(node.content);
-      // Divergence de négation = contradiction potentielle
       if (hasNegation !== nodeHasNegation) {
         contradictions.push(
           `Contradiction détectée avec le nœud ${node.id} : "${node.content.slice(0, 80)}"`,
@@ -270,11 +266,10 @@ export class TtcService {
    * Propage le contexte depuis un nœud source (BFS pondéré).
    * P(n_i, n_j) = w_ij × relevanceScore
    */
-  propagateContext(sourceId: string, threshold: number = 0.01, maxDepth: number = 10): PropagationResult {
+  async propagateContext(sourceId: string, threshold: number = 0.01, maxDepth: number = 10): Promise<PropagationResult> {
     const reached = new Map<string, number>();
-    const queue: Array<[string, number, number]> = [[sourceId, 1.0, 0]]; // [nodeId, score, depth]
+    const queue: Array<[string, number, number]> = [[sourceId, 1.0, 0]];
     let maxDepthReached = 0;
-
     reached.set(sourceId, 1.0);
 
     while (queue.length > 0) {
@@ -282,12 +277,11 @@ export class TtcService {
       if (depth >= maxDepth) continue;
       maxDepthReached = Math.max(maxDepthReached, depth);
 
-      const outgoing = this.getOutgoingLinks(currentId);
+      const outgoing = await this.linkRepo.findBySourceId(currentId);
       for (const link of outgoing) {
         const propagationForce = link.weight * link.relevanceScore;
         const newScore = currentScore * propagationForce;
         if (newScore < threshold) continue;
-
         const existing = reached.get(link.targetId) ?? 0;
         if (newScore > existing) {
           reached.set(link.targetId, newScore);
@@ -296,13 +290,8 @@ export class TtcService {
       }
     }
 
-    reached.delete(sourceId); // On ne compte pas le nœud source
-    return {
-      sourceId,
-      reachedNodes: reached,
-      maxDepth: maxDepthReached,
-      reachedCount: reached.size,
-    };
+    reached.delete(sourceId);
+    return { sourceId, reachedNodes: reached, maxDepth: maxDepthReached, reachedCount: reached.size };
   }
 
   // ============================================================
@@ -313,11 +302,12 @@ export class TtcService {
    * Analyse une réponse LLM par rapport à la toile TTC.
    * Retourne un rapport d'hallucination complet.
    */
-  detectHallucination(llmResponse: string): HallucinationReport {
+  async detectHallucination(llmResponse: string): Promise<HallucinationReport> {
     const contradictingNodeIds: string[] = [];
     const suggestions: string[] = [];
 
-    if (this.nodes.size === 0) {
+    const nodeCount = await this.nodeRepo.count();
+    if (nodeCount === 0) {
       return {
         isHallucination: true,
         confidence: 0,
@@ -334,10 +324,9 @@ export class TtcService {
     let contradictionCount = 0;
 
     for (const assertion of assertions) {
-      const report = this.detectContradictions(assertion);
+      const report = await this.detectContradictions(assertion);
       if (report.isContradiction) {
         contradictionCount++;
-        // Extrait les IDs des nœuds contredisants depuis les messages
         for (const msg of report.contradictions) {
           const match = msg.match(/nœud ([a-f0-9-]+)/);
           if (match && match[1]) {
@@ -369,35 +358,36 @@ export class TtcService {
   // Statistiques
   // ============================================================
 
-  getStats() {
-    const verifications = this.verifyAllAnchors();
+  async getStats() {
+    const nodeCount = await this.nodeRepo.count();
+    const linkCount = await this.linkRepo.count();
+    const allNodes = await this.nodeRepo.findAll();
+    const allLinks = await this.linkRepo.findAll();
+
     let anchoredCount = 0;
-    for (const v of verifications.values()) {
+    let totalAmbiguity = 0;
+
+    for (const node of allNodes) {
+      const v = this.computeAnchorVerification(node);
       if (v.isAnchored) anchoredCount++;
+      totalAmbiguity += node.ambiguity;
     }
 
-    const contradictions = [...this.links.values()].filter((l) => l.relation === 'contradicts');
-
-    const totalAmbiguity = [...this.nodes.values()].reduce((sum, n) => sum + n.ambiguity, 0);
-    const entropy = this.nodes.size > 0 ? totalAmbiguity / this.nodes.size : 0;
+    const contradictions = allLinks.filter((l: StoredLink) => l.relation === 'contradicts');
 
     return {
-      nodeCount: this.nodes.size,
-      linkCount: this.links.size,
+      nodeCount,
+      linkCount,
       anchoredCount,
-      anchoringRate: this.nodes.size > 0 ? anchoredCount / this.nodes.size : 1,
+      anchoringRate: nodeCount > 0 ? anchoredCount / nodeCount : 1,
       contradictionCount: contradictions.length,
-      globalEntropy: entropy,
+      globalEntropy: nodeCount > 0 ? totalAmbiguity / nodeCount : 0,
     };
   }
 
   // ============================================================
   // Helpers privés
   // ============================================================
-
-  private clamp(value: number, min: number, max: number): number {
-    return Math.min(Math.max(value, min), max);
-  }
 
   private isValidUri(uri: string): boolean {
     if (uri.length === 0) return false;
