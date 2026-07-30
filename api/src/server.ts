@@ -8,7 +8,7 @@ import express, { type Express } from 'express';
 import cors from 'cors';
 import { environment } from './config/environment.js';
 import { requestLogger, globalErrorHandler } from './middlewares/index.js';
-import { healthRouter } from './routes/index.js';
+import { healthRouter, nodeRouter, ttcRouter } from './routes/index.js';
 
 /**
  * Construit et configure l'application Express.
@@ -37,6 +37,10 @@ function buildExpressApplication(): Express {
 
   // Route de diagnostic /health
   application.use(healthRouter);
+
+  // Routes TTC — CRUD nœuds, liens, détection
+  application.use(nodeRouter);
+  application.use(ttcRouter);
 
   // --- Middleware d'erreur (toujours en dernier) ---
   application.use(globalErrorHandler);

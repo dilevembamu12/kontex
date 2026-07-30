@@ -2,3 +2,5 @@
 /// Agrège toutes les routes de l'API.
 
 export { healthRouter } from './healthRoutes.js';
+export { nodeRouter } from './nodeRoutes.js';
+export { ttcRouter } from './ttcRoutes.js';
