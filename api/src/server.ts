@@ -19,12 +19,15 @@ function buildExpressApplication(): Express {
 
   // --- Middlewares globaux (ordre important) ---
 
-  // CORS — configuré depuis les variables d'environnement
+  // CORS — permissif en développement, restrictif en production
+  const corsOrigin = environment.NODE_ENV === 'production'
+    ? environment.CORS_ORIGIN
+    : '*';
   application.use(cors({
-    origin: environment.CORS_ORIGIN,
+    origin: corsOrigin,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true,
+    credentials: false,
   }));
 
   // Parsing JSON — limite de taille pour sécurité
