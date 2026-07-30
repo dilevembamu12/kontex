@@ -1,0 +1,127 @@
+{
+  "name": "kontex-vscode",
+  "displayName": "KontEx — Vibe Coding sans hallucination",
+  "description": "Extension VSCode pour le Context Engineering basé sur la Théorie de la Toile Cosmologique (TTC). Détecte les hallucinations, ancre le code dans des sources vérifiables.",
+  "version": "0.1.0-alpha",
+  "publisher": "dilevembamu12",
+  "license": "Proprietary",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Linters",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "kontex",
+    "ttc",
+    "hallucination",
+    "context",
+    "vibe-coding",
+    "ai"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "kontex.verifyHallucination",
+        "title": "KontEx: Vérifier l'hallucination",
+        "category": "KontEx"
+      },
+      {
+        "command": "kontex.anchorSelection",
+        "title": "KontEx: Ancrer la sélection",
+        "category": "KontEx"
+      },
+      {
+        "command": "kontex.openDashboard",
+        "title": "KontEx: Ouvrir le dashboard",
+        "category": "KontEx"
+      },
+      {
+        "command": "kontex.showStats",
+        "title": "KontEx: Afficher les statistiques TTC",
+        "category": "KontEx"
+      },
+      {
+        "command": "kontex.refreshWeb",
+        "title": "KontEx: Rafraîchir la toile",
+        "category": "KontEx",
+        "icon": "$(refresh)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "kontex-sidebar",
+          "title": "KontEx — Toile TTC",
+          "icon": "$(graph)"
+        }
+      ]
+    },
+    "views": {
+      "kontex-sidebar": [
+        {
+          "id": "kontex.webView",
+          "name": "Toile contextuelle"
+        },
+        {
+          "id": "kontex.statsView",
+          "name": "Statistiques"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "kontex.verifyHallucination",
+          "group": "navigation",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "kontex.anchorSelection",
+          "group": "navigation",
+          "when": "editorHasSelection"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "KontEx",
+      "properties": {
+        "kontex.apiUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "URL de l'API Gateway KontEx"
+        },
+        "kontex.autoVerifyOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Vérifier automatiquement les hallucinations à la sauvegarde"
+        },
+        "kontex.confidenceThreshold": {
+          "type": "number",
+          "default": 0.7,
+          "description": "Seuil de confiance en dessous duquel une hallucination est signalée"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build -- --minify",
+    "build": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.7.0"
+  }
+}
