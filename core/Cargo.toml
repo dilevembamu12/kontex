@@ -1,0 +1,47 @@
+# @anchor: PROJECT_CONTEXT.md §3.1 — Core Engine Rust
+# @anchor: Rust edition 2024 — https://doc.rust-lang.org/edition-guide/rust-2024/
+# Moteur TTC (Théorie de la Toile Cosmologique) — KontEx Core
+# Implémente les 4 principes : Ancrage (A), Cohérence (C), Propagation (P), Entropie Minimale (E_min)
+
+[package]
+name = "kontex-ttc"
+version = "0.1.0-alpha"
+edition = "2024"
+description = "KontEx TTC Engine — Context Web based on Cosmological Web Theory"
+license = "Proprietary"
+authors = ["dilevembamu12"]
+
+[lib]
+name = "kontex_ttc"
+path = "src/lib.rs"
+
+[[bench]]
+name = "web_benchmark"
+harness = false
+
+[dependencies]
+# Sérialisation pour l'interopérabilité avec l'API Gateway
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# UUID pour les identifiants de nœuds
+uuid = { version = "1", features = ["v4", "serde"] }
+# Horodatage
+chrono = { version = "0.4", features = ["serde"] }
+# Hachage pour les comparaisons rapides
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+# Graphe pour la toile contextuelle
+petgraph = "0.7"
+
+[dev-dependencies]
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+# Tests proptest
+proptest = "1"
+# Random pour les tests
+rand = "0.8"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+panic = "abort"
