@@ -1,0 +1,124 @@
+/// @anchor: Docker Compose — https://docs.docker.com/compose/compose-file/
+/// @anchor: PROJECT_CONTEXT.md §3.1 — PostgreSQL+pgvector, Redis
+/// Orchestration des 4 services KontEx pour le développement local.
+
+version: "3.9"
+
+services:
+  # ============================================================
+  # Service 1 : kontex-api — API Gateway Node.js/Express 5
+  # ============================================================
+  kontex-api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+      target: production
+    container_name: kontex-api
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${PORT:-3000}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://kontex:kontex@kontex-postgres:5432/kontex}
+      REDIS_URL: ${REDIS_URL:-redis://kontex-redis:6379}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      kontex-postgres:
+        condition: service_healthy
+      kontex-redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - kontex-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ============================================================
+  # Service 2 : kontex-postgres — Base PostgreSQL + pgvector
+  # ============================================================
+  kontex-postgres:
+    image: pgvector/pgvector:pg17
+    container_name: kontex-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kontex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kontex}
+      POSTGRES_DB: ${POSTGRES_DB:-kontex}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - kontex-postgres-data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+    networks:
+      - kontex-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kontex} -d ${POSTGRES_DB:-kontex}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ============================================================
+  # Service 3 : kontex-redis — Cache Redis
+  # ============================================================
+  kontex-redis:
+    image: redis:7-alpine
+    container_name: kontex-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - kontex-redis-data:/data
+    restart: unless-stopped
+    networks:
+      - kontex-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # ============================================================
+  # Service 4 : graphiti-db — Moteur TTC (Rust) + Stockage interne
+  # ============================================================
+  graphiti-db:
+    # Phase 0 : image placeholder — sera remplacée par l'image Rust du moteur TTC en Phase 1
+    image: alpine:3.21
+    container_name: graphiti-db
+    command: >
+      sh -c "
+        echo '[Graphiti::TTC] Moteur TTC en attente — Phase 1' &&
+        while true; do sleep 3600; done
+      "
+    restart: unless-stopped
+    networks:
+      - kontex-network
+    healthcheck:
+      test: ["CMD", "echo", "placeholder"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+# ============================================================
+# Volumes persistants
+# ============================================================
+volumes:
+  kontex-postgres-data:
+    name: kontex-postgres-data
+  kontex-redis-data:
+    name: kontex-redis-data
+
+# ============================================================
+# Réseau interne KontEx
+# ============================================================
+networks:
+  kontex-network:
+    name: kontex-network
+    driver: bridge
