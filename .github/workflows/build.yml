@@ -1,0 +1,76 @@
+# KontEx — Build & Docker
+# Compile le moteur Rust natif et construit les images Docker.
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ============================================================
+  # Rust — Build release + napi native .so
+  # ============================================================
+  rust-build:
+    name: Rust Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('core/Cargo.lock') }}
+
+      - name: Build release
+        run: cargo build --features napi --release
+
+      - name: Copy .so artifact
+        run: |
+          mkdir -p artifacts
+          cp target/release/libkontex_ttc.so artifacts/
+          cp target/release/libkontex_ttc.so npm/kontex-ttc.linux-x64-gnu.node
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kontex-ttc-linux-x64
+          path: core/artifacts/libkontex_ttc.so
+
+  # ============================================================
+  # Docker — Build API image
+  # ============================================================
+  docker-api:
+    name: Docker API
+    runs-on: ubuntu-latest
+    needs: rust-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download native .so
+        uses: actions/download-artifact@v4
+        with:
+          name: kontex-ttc-linux-x64
+          path: core/npm/
+
+      - name: Build Docker image
+        run: docker build -t kontex-api:latest -f api/Dockerfile api/
+
+      - name: Test health endpoint
+        run: |
+          docker run -d --name kontex-api -p 3000:3000 -e DATABASE_URL=postgresql://test:test@localhost/test -e REDIS_URL=redis://localhost:6379 kontex-api:latest
+          sleep 5
+          curl --fail http://localhost:3000/health || (docker logs kontex-api && exit 1)

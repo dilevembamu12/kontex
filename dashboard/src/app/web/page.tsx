@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { StatusBadge } from '@/components/StatusBadge';
+import TtcGraph from '@/components/TtcGraph';
 import { api, type KontExNode, type KontExLink } from '@/lib/api';
 
 const KIND_COLORS: Record<string, string> = {
@@ -55,6 +56,9 @@ export default function WebPage() {
         <StatBox label="Liens" value={links.length} />
         <StatBox label="Contradictions" value={links.filter(l => l.relation === 'contradicts').length} />
       </div>
+
+      {/* Graphe D3.js */}
+      <TtcGraph nodes={nodes} links={links} />
 
       {/* Ajout rapide */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 p-4 flex gap-3">
