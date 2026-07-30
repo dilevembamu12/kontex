@@ -14,6 +14,8 @@
 /// - 10 000 nœuds tissés en < 100ms
 /// - Taux de détection d'hallucination > 95%
 
+#[cfg(feature = "napi")]
+pub mod bridge;
 pub mod engine;
 pub mod link;
 pub mod node;

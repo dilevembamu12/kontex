@@ -1,0 +1,22 @@
+{
+  "name": "@kontex/ttc-engine",
+  "version": "0.1.0-alpha",
+  "description": "KontEx TTC Engine — native Rust bindings for Node.js via napi-rs",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "kontex-ttc.linux-x64-gnu.node"
+  ],
+  "engines": {
+    "node": ">= 18"
+  },
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "license": "Proprietary",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dilevembamu12/kontex"
+  }
+}
