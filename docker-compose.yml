@@ -1,6 +1,6 @@
-/// @anchor: Docker Compose — https://docs.docker.com/compose/compose-file/
-/// @anchor: PROJECT_CONTEXT.md §3.1 — PostgreSQL+pgvector, Redis
-/// Orchestration des 4 services KontEx pour le développement local.
+# @anchor: Docker Compose — https://docs.docker.com/compose/compose-file/
+# @anchor: PROJECT_CONTEXT.md §3.1 — PostgreSQL+pgvector, Redis
+# Orchestration des 4 services KontEx pour le développement local.
 
 version: "3.9"
 
