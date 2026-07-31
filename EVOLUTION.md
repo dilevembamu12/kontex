@@ -117,6 +117,15 @@ kontex/
 | `0d377c3` | 6 | `feat(bridge): Point 1+2+3 — Bridge Rust napi-rs, PostgreSQL, Redis` |
 | `34302d6` | 6 | `fix(core): cdylib actif en permanence + compilation native réussie` |
 | `bced328` | 6 | `fix(api): correction du chemin relatif vers le module natif Rust` |
+| `5a0c1ef` | 6 | `docs: mise à jour EVOLUTION.md + fix dashboard Next.js 14` |
+| `fb76e2f` | 6 | `docs: TODO.md — plan d'action complet` |
+| `c98594c` | 7 | `feat(vscode): Extension VSCode — Vibe Coding sans hallucination` |
+| `1e9356e` | 7 | `fix(vscode): packaging .vsix fonctionnel` |
+| `7c7369e` | 8 | `feat(dashboard): connecté aux vrais endpoints API` |
+| `ce7273b` | 8 | `fix(api): CORS permissif en développement` |
+| `dc4bf60` | 9 | `feat: CI/CD GitHub Actions + D3.js graph` |
+| `a1a3d82` | 10 | `feat(persistence): PostgreSQL + Redis repositories async` |
+| `366500e` | 11 | `docs: API.md, TTC.md, ONBOARDING.md + fix docker-compose` |
 
 ---
 
