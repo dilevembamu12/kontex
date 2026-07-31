@@ -22,7 +22,7 @@ CREATE TABLE nodes (
     weight      REAL NOT NULL DEFAULT 0.5 CHECK (weight >= 0 AND weight <= 1),
     ambiguity   REAL NOT NULL DEFAULT 0.5 CHECK (ambiguity >= 0 AND ambiguity <= 1),
     -- Embedding vectoriel pour la recherche sémantique (pgvector)
-    embedding   VECTOR(1536),
+    embedding   VECTOR,
     -- Métadonnées JSON
     metadata    JSONB DEFAULT '{}',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),

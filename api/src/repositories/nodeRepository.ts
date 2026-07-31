@@ -3,6 +3,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { AnchorInput, ContextNodeInput, StoredNode } from '../services/ttcService.js';
+import { embeddingGenerator, toPgVector } from '../services/embeddingService.js';
 
 /**
  * Interface commune pour le stockage des nœuds (PostgreSQL ou in-memory).
@@ -12,6 +13,8 @@ export interface NodeRepository {
   findById(id: string): Promise<StoredNode | null>;
   findAll(): Promise<StoredNode[]>;
   count(): Promise<number>;
+  /** Trouve les N nœuds les plus similaires via cosine similarity pgvector */
+  findSimilar(embedding: Float32Array, limit: number): Promise<Array<{ id: string; content: string; similarity: number }>>;
 }
 
 /**
@@ -37,11 +40,15 @@ export class PostgresNodeRepository implements NodeRepository {
     const id = randomUUID();
     const now = new Date().toISOString();
 
+    // Génère l'embedding du contenu
+    const embedding = await embeddingGenerator.embed(input.content);
+    const pgVector = toPgVector(embedding);
+
     await pool.query(
-      `INSERT INTO nodes (id, kind, content, weight, ambiguity, metadata, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      `INSERT INTO nodes (id, kind, content, weight, ambiguity, embedding, metadata, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [id, input.kind, input.content, input.weight ?? 0.5, input.ambiguity ?? 0.5,
-       JSON.stringify(input.metadata ?? {}), now, now],
+       pgVector, JSON.stringify(input.metadata ?? {}), now, now],
     );
 
     // Insert anchors
@@ -129,6 +136,34 @@ export class PostgresNodeRepository implements NodeRepository {
     const result = await pool.query('SELECT COUNT(*) FROM nodes');
     return Number((result.rows[0] as Record<string, unknown>)['count']);
   }
+
+  /**
+   * Trouve les N nœuds les plus similaires via l'opérateur cosine pgvector `<=>`.
+   *
+   * Utilise l'index IVFFlat pour des recherches < 10ms sur 10k+ nœuds.
+   * Le score de similarité est 1 - distance_cosinus ∈ [0, 1].
+   */
+  async findSimilar(embedding: Float32Array, limit: number): Promise<Array<{ id: string; content: string; similarity: number }>> {
+    const pool = await this.getPool();
+    const pgVector = toPgVector(embedding);
+
+    // pgvector `<=>` = distance cosinus ∈ [0, 2]
+    // similarité = 1 - distance/2 → ∈ [0, 1]
+    const result = await pool.query(
+      `SELECT id, content, 1.0 - (embedding <=> $1::vector) / 2.0 AS similarity
+       FROM nodes
+       WHERE embedding IS NOT NULL
+       ORDER BY embedding <=> $1::vector
+       LIMIT $2`,
+      [pgVector, limit],
+    );
+
+    return (result.rows as Array<Record<string, unknown>>).map((row) => ({
+      id: row['id'] as string,
+      content: row['content'] as string,
+      similarity: Number(row['similarity']),
+    }));
+  }
 }
 
 /**
@@ -153,4 +188,11 @@ export class InMemoryNodeRepository implements NodeRepository {
   async findById(id: string): Promise<StoredNode | null> { return this.nodes.get(id) ?? null; }
   async findAll(): Promise<StoredNode[]> { return [...this.nodes.values()]; }
   async count(): Promise<number> { return this.nodes.size; }
+
+  async findSimilar(_embedding: Float32Array, limit: number): Promise<Array<{ id: string; content: string; similarity: number }>> {
+    // Fallback in-memory : retourne les derniers nœuds (pas de similarité vectorielle)
+    return [...this.nodes.values()]
+      .slice(0, limit)
+      .map((n) => ({ id: n.id, content: n.content, similarity: 0.5 }));
+  }
 }

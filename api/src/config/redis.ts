@@ -10,7 +10,11 @@ export interface RedisClient {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, ttlSeconds?: number): Promise<void>;
   del(key: string): Promise<void>;
+  /** Supprime toutes les clés correspondant à un pattern (ex: kontex:cache:*:nodes:*) */
+  deleteByPattern(pattern: string): Promise<number>;
   exists(key: string): Promise<boolean>;
+  /** Vérifie que Redis est joignable (PING) */
+  ping(): Promise<boolean>;
   connect(): Promise<void>;
   disconnect(): Promise<void>;
 }
@@ -52,9 +56,44 @@ async function createRedisClient(): Promise<RedisClient> {
       async del(key: string): Promise<void> {
         await redis.del(key);
       },
+      async deleteByPattern(pattern: string): Promise<number> {
+        let cursor = '0';
+        let deletedCount = 0;
+        do {
+          const [newCursor, keys] = await redis.scan(
+            cursor,
+            'MATCH',
+            pattern,
+            'COUNT',
+            100,
+          );
+          cursor = newCursor;
+          if (keys.length > 0) {
+            const pipeline = redis.pipeline();
+            for (const k of keys) {
+              pipeline.del(k);
+            }
+            const results = await pipeline.exec();
+            if (results) {
+              for (const [err] of results) {
+                if (!err) deletedCount++;
+              }
+            }
+          }
+        } while (cursor !== '0');
+        return deletedCount;
+      },
       async exists(key: string): Promise<boolean> {
         const result = await redis.exists(key);
         return result === 1;
+      },
+      async ping(): Promise<boolean> {
+        try {
+          const result = await redis.ping();
+          return result === 'PONG';
+        } catch {
+          return false;
+        }
       },
       async connect() {
         await redis.ping();
@@ -80,7 +119,9 @@ function createNoopCache(): RedisClient {
     async get() { return null; },
     async set() { /* no-op */ },
     async del() { /* no-op */ },
+    async deleteByPattern() { return 0; },
     async exists() { return false; },
+    async ping() { return false; },
     async connect() { /* no-op */ },
     async disconnect() { /* no-op */ },
   };

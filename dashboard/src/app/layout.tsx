@@ -13,8 +13,10 @@ export const metadata: Metadata = {
 const NAVIGATION_ITEMS = [
   { href: '/', label: '📊 Vue d\'ensemble' },
   { href: '/web', label: '🕸️ Toile TTC' },
+  { href: '/import', label: '📥 Import' },
   { href: '/health', label: '💚 Santé' },
   { href: '/anchoring', label: '⚓ Ancrage' },
+  { href: '/config', label: '⚙️ Configuration' },
 ] as const;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

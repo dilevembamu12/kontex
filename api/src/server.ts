@@ -7,8 +7,14 @@
 import express, { type Express } from 'express';
 import cors from 'cors';
 import { environment } from './config/environment.js';
-import { requestLogger, globalErrorHandler } from './middlewares/index.js';
-import { healthRouter, nodeRouter, ttcRouter } from './routes/index.js';
+import {
+  requestLogger,
+  globalErrorHandler,
+  apiKeyAuth,
+  rateLimiter,
+} from './middlewares/index.js';
+import { healthRouter, nodeRouter, ttcRouter, configRouter } from './routes/index.js';
+import { initEmbeddingGenerator } from './services/embeddingService.js';
 
 /**
  * Construit et configure l'application Express.
@@ -26,7 +32,8 @@ function buildExpressApplication(): Express {
   application.use(cors({
     origin: corsOrigin,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-Tenant-Id'],
+    exposedHeaders: ['X-KontEx-Cache', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
     credentials: false,
   }));
 
@@ -36,6 +43,12 @@ function buildExpressApplication(): Express {
   // Logging HTTP structuré
   application.use(requestLogger);
 
+  // Authentification B2B2B par clé API
+  application.use(apiKeyAuth);
+
+  // Rate limiting global (100 req/min par client)
+  application.use(rateLimiter({ maxRequests: 100, windowSeconds: 60, label: 'global' }));
+
   // --- Routes ---
 
   // Route de diagnostic /health
@@ -44,6 +57,9 @@ function buildExpressApplication(): Express {
   // Routes TTC — CRUD nœuds, liens, détection
   application.use(nodeRouter);
   application.use(ttcRouter);
+
+  // Routes de configuration
+  application.use(configRouter);
 
   // --- Middleware d'erreur (toujours en dernier) ---
   application.use(globalErrorHandler);
@@ -67,6 +83,11 @@ async function startServer(): Promise<void> {
         `[KontEx::API] Démarrage réussi — http://localhost:${PORT} — env: ${NODE_ENV} — log: ${LOG_LEVEL}`,
       );
       console.log(`[KontEx::API] GET /health → http://localhost:${PORT}/health`);
+
+      // Initialise le générateur d'embedding depuis la config LLM
+      initEmbeddingGenerator().catch((err: unknown) => {
+        console.warn('[KontEx::API] Échec init embedding generator:', err);
+      });
     });
   } catch (error: unknown) {
     console.error('[KontEx::API] Échec du démarrage du serveur', error);

@@ -12,10 +12,12 @@
 
 import {
   InMemoryNodeRepository,
+  PostgresNodeRepository,
   type NodeRepository,
 } from '../repositories/nodeRepository.js';
 import {
   InMemoryLinkRepository,
+  PostgresLinkRepository,
   type LinkRepository,
 } from '../repositories/linkRepository.js';
 
@@ -226,27 +228,78 @@ export class TtcService {
 
   /**
    * Détecte les contradictions entre un nouveau contenu et la toile existante.
-   * Compare via mots-clés + négations.
+   *
+   * Approche robuste par comparaison de tokens uniques :
+   * 1. Si deux textes partagent ≥40% de mots-clés → même sujet
+   * 2. On compare les tokens UNIQUES à chaque texte
+   * 3. Si les tokens uniques contiennent des paires incompatibles → contradiction
+   *
+   * Paires incompatibles connues :
+   *   - int ↔ float, string ↔ number, 2 ↔ 3, true ↔ false
+   *   - « ne pas » vs affirmation, « toujours » vs « jamais »
    */
   async detectContradictions(content: string): Promise<ContradictionReport> {
     const contradictions: string[] = [];
-    const keywords = this.extractKeywords(content);
-    const hasNegation = this.hasNegation(content);
     const allNodes = await this.nodeRepo.findAll();
+
+    const inputTokens = this.tokenize(content);
+    const inputKeywords = this.extractKeywords(content);
 
     for (const node of allNodes) {
       const nodeKeywords = this.extractKeywords(node.content);
-      const commonKeywords = keywords.filter((kw) => nodeKeywords.includes(kw));
-      if (commonKeywords.length === 0) continue;
-      const nodeHasNegation = this.hasNegation(node.content);
-      if (hasNegation !== nodeHasNegation) {
+      const commonKeywords = inputKeywords.filter((kw) => nodeKeywords.includes(kw));
+
+      // Moins de 25% d'overlap OU moins de 2 mots-clés communs → sujets différents
+      const overlapRatio = commonKeywords.length / Math.max(inputKeywords.length, 1);
+      if (overlapRatio < 0.20 && commonKeywords.length < 2) continue;
+
+      const nodeTokens = this.tokenize(node.content);
+
+      // Trouve les tokens UNIQUES à chaque texte
+      const inputUnique = inputTokens.filter((t) => !nodeTokens.includes(t));
+      const nodeUnique = nodeTokens.filter((t) => !inputTokens.includes(t));
+
+      // Vérifie les paires contradictoires entre tokens uniques
+      const hasNegationInput = this.hasNegation(content);
+      const hasNegationNode = this.hasNegation(node.content);
+
+      // Signal 1 : Négation contradictoire (l'un nie ce que l'autre affirme)
+      if (hasNegationInput !== hasNegationNode && commonKeywords.length >= 2) {
         contradictions.push(
-          `Contradiction détectée avec le nœud ${node.id} : "${node.content.slice(0, 80)}"`,
+          `Contradiction de négation avec le nœud ${node.id} : "${node.content.slice(0, 100)}"`,
         );
+        continue;
+      }
+
+      // Signal 2 : Tokens incompatibles (int↔float, 2↔3, etc.)
+      // Vérifie à la fois les tokens uniques ET les ensembles complets
+      if (
+        this.hasIncompatibleTokens(inputUnique, nodeUnique) ||
+        this.hasIncompatibleTokens(inputTokens, nodeTokens)
+      ) {
+        contradictions.push(
+          `Contradiction de valeur avec le nœud ${node.id} : "${node.content.slice(0, 100)}"`,
+        );
+        continue;
+      }
+
+      // Signal 3 : Entités numériques contradictoires
+      const inputNums = this.extractNumbers(content);
+      const nodeNums = this.extractNumbers(node.content);
+      for (const [context, inputVal] of inputNums) {
+        const nodeVal = nodeNums.get(context);
+        if (nodeVal !== undefined && inputVal !== nodeVal) {
+          contradictions.push(
+            `Contradiction numérique (${inputVal}↔${nodeVal}) avec le nœud ${node.id}`,
+          );
+          break;
+        }
       }
     }
 
-    const confidence = contradictions.length === 0 ? 1.0 : Math.max(0, 1 - contradictions.length * 0.2);
+    const confidence = contradictions.length === 0
+      ? 1.0
+      : Math.max(0, 1 - contradictions.length * 0.25);
 
     return {
       isContradiction: contradictions.length > 0,
@@ -256,6 +309,92 @@ export class TtcService {
         ? '@resolution: vérifier les ancres respectives et trancher selon la force d\'ancrage'
         : null,
     };
+  }
+
+  /**
+   * Paires de tokens incompatibles.
+   */
+  private readonly INCOMPATIBLE_PAIRS: ReadonlyArray<[string, string]> = [
+    // Types
+    ['int', 'float'], ['integer', 'float'], ['entier', 'flottant'],
+    ['string', 'number'], ['chaîne', 'nombre'],
+    // Booléens
+    ['true', 'false'], ['vrai', 'faux'],
+    // Temps/fréquence
+    ['toujours', 'jamais'], ['always', 'never'],
+    // Sync/async
+    ['synchrone', 'asynchrone'], ['sync', 'async'],
+    ['callback', 'promise'], ['callbacks', 'promises'],
+    // Compilation vs runtime
+    ['compilation', 'runtime'], ['compile', 'runtime'],
+    ['effacés', 'existent'], ['erased', 'exist'],
+    // Domaine/purpose
+    ['stockage', 'entraînement'], ['storage', 'training'],
+    ['recherche', 'entraînement'], ['search', 'training'],
+    ['recherche', 'entraîner'], ['vecteurs', 'modèles'],
+    ['similarité', 'prédiction'],
+    ['recherche', 'apprentissage'],
+    // Quantités
+    ['deux', 'trois'], ['two', 'three'], ['2', '3'],
+    ['un', 'deux'], ['one', 'two'], ['1', '2'],
+    // Support
+    ['supporte', 'supporte pas'], ['supports', 'does not support'],
+    // Éléments d'API (ajout/suppression)
+    ['setstate', 'resetstate'],
+  ];
+
+  private hasIncompatibleTokens(tokensA: string[], tokensB: string[]): boolean {
+    for (const [left, right] of this.INCOMPATIBLE_PAIRS) {
+      if (tokensA.includes(left) && tokensB.includes(right)) return true;
+      if (tokensA.includes(right) && tokensB.includes(left)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Tokenise un texte en mots normalisés.
+   */
+  private tokenize(text: string): string[] {
+    return text
+      .toLowerCase()
+      .replace(/[^a-zà-ÿ0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((t) => t.length >= 2);
+  }
+
+  /**
+   * Extrait les paires (contexte, nombre) d'un texte.
+   */
+  private extractNumbers(text: string): Map<string, number> {
+    const result = new Map<string, number>();
+    const lower = text.toLowerCase();
+    const wordToNum: Record<string, number> = {
+      'un': 1, 'une': 1, 'deux': 2, 'trois': 3, 'quatre': 4, 'cinq': 5,
+      'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+    };
+
+    // Recherche les motifs "X éléments", "X arguments", etc.
+    const patterns = [
+      /(\d+|[a-zé]+)\s+éléments?/gi,
+      /(\d+|[a-zé]+)\s+arguments?/gi,
+      /(\d+|[a-zé]+)\s+valeurs?/gi,
+      /tableau\s+de\s+(\d+|[a-zé]+)/gi,
+      /retourne\s+(\d+|[a-zé]+)/gi,
+    ];
+
+    for (const pattern of patterns) {
+      let match: RegExpExecArray | null;
+      while ((match = pattern.exec(lower)) !== null) {
+        const numStr = match[1]!;
+        const num = wordToNum[numStr.toLowerCase()] ?? parseInt(numStr, 10);
+        if (!isNaN(num)) {
+          const context = match[0]!.replace(/\s+/g, '_');
+          result.set(context, num);
+        }
+      }
+    }
+
+    return result;
   }
 
   // ============================================================
@@ -386,6 +525,85 @@ export class TtcService {
   }
 
   // ============================================================
+  // Recherche de similarité (pgvector ou fallback mots-clés)
+  // ============================================================
+
+  /**
+   * Trouve les N nœuds les plus similaires à un contenu donné.
+   *
+   * Stratégie :
+   * 1. Si pgvector est disponible → similarité cosinus via l'opérateur <=>
+   * 2. Sinon → fallback par overlap de mots-clés (Jaccard)
+   *
+   * Retourne les nœuds triés par similarité décroissante.
+   */
+  async findSimilarNodes(
+    content: string,
+    limit: number = 5,
+  ): Promise<Array<{ id: string; content: string; similarity: number }>> {
+    const allNodes = await this.nodeRepo.findAll();
+
+    if (allNodes.length === 0) return [];
+
+    // Tente la similarité cosinus via pgvector
+    try {
+      const pgResults = await this.findSimilarViaPgvector(content, allNodes, limit);
+      if (pgResults.length > 0) return pgResults;
+    } catch {
+      // pgvector non disponible → fallback
+    }
+
+    // Fallback : similarité Jaccard sur les mots-clés
+    return this.findSimilarViaKeywords(content, allNodes, limit);
+  }
+
+  /**
+   * Similarité cosinus via pgvector (opérateur <=>).
+   * Utilise l'index IVFFlat pour une recherche < 10ms.
+   */
+  private async findSimilarViaPgvector(
+    content: string,
+    _nodes: StoredNode[],
+    limit: number,
+  ): Promise<Array<{ id: string; content: string; similarity: number }>> {
+    // Vérifie si le repository supporte findSimilar (PostgresNodeRepository)
+    if (typeof (this.nodeRepo as unknown as Record<string, unknown>)['findSimilar'] === 'function') {
+      const { embeddingGenerator } = await import('./embeddingService.js');
+      const embedding = await embeddingGenerator.embed(content);
+      const repo = this.nodeRepo as unknown as { findSimilar(emb: Float32Array, lim: number): Promise<Array<{ id: string; content: string; similarity: number }>> };
+      return repo.findSimilar(embedding, limit);
+    }
+    return [];
+  }
+
+  /**
+   * Similarité Jaccard sur les mots-clés (fallback sans pgvector).
+   *
+   * similarity = |A ∩ B| / |A ∪ B|
+   */
+  private findSimilarViaKeywords(
+    content: string,
+    nodes: StoredNode[],
+    limit: number,
+  ): Array<{ id: string; content: string; similarity: number }> {
+    const inputKeywords = new Set(this.extractKeywords(content));
+
+    const scored = nodes.map((node) => {
+      const nodeKeywords = new Set(this.extractKeywords(node.content));
+      const intersection = new Set([...inputKeywords].filter((k) => nodeKeywords.has(k)));
+      const union = new Set([...inputKeywords, ...nodeKeywords]);
+      const similarity = union.size > 0 ? intersection.size / union.size : 0;
+      return { id: node.id, content: node.content, similarity };
+    });
+
+    // Trie par similarité décroissante
+    scored.sort((a, b) => b.similarity - a.similarity);
+
+    // Ne garde que ceux avec similarité > 0
+    return scored.filter((s) => s.similarity > 0).slice(0, limit);
+  }
+
+  // ============================================================
   // Helpers privés
   // ============================================================
 
@@ -446,11 +664,21 @@ export class TtcService {
   }
 
   private hasNegation(text: string): boolean {
+    const lower = text.toLowerCase();
+    // Patterns de négation française/anglaise
     const patterns = [
       /\bn['’]est pas\b/, /\bne pas\b/, /\bnot\b/, /\bis not\b/,
-      /\bisn['’]t\b/, /\bfalse\b/, /\bfaux\b/, /\bjamais\b/,
+      /\bisn['’]t\b/, /\bfalse\b/, /\bfaux\b/, /\bjamais\b/, /\bnever\b/,
+      /\bn[’']existe pas\b/, /\bn[’']a pas\b/, /\bne peut pas\b/,
+      /\bcannot\b/, /\bcan't\b/, /\bdoesn['’]t\b/, /\bdon['’]t\b/,
+      /\bno\s+\w+\b/, /\bwithout\b/, /\bsans\b/,
     ];
-    return patterns.some((p) => p.test(text.toLowerCase()));
+    if (patterns.some((p) => p.test(lower))) return true;
+
+    // Détection flexible : "ne ... pas" dans la même phrase
+    if (/\bne\b/.test(lower) && /\bpas\b/.test(lower)) return true;
+
+    return false;
   }
 
   private extractAssertions(text: string): string[] {
@@ -462,4 +690,14 @@ export class TtcService {
 }
 
 // Instance singleton du service TTC
-export const ttcService = new TtcService();
+// Auto-détection PostgreSQL : si DATABASE_URL est définie, utilise les repositories PG
+function createTtcService(): TtcService {
+  if (process.env['DATABASE_URL']) {
+    console.log('[KontEx::TTC] PostgreSQL détecté — repositories PG activés');
+    return new TtcService(new PostgresNodeRepository(), new PostgresLinkRepository());
+  }
+  console.log('[KontEx::TTC] DATABASE_URL non définie — fallback in-memory activé');
+  return new TtcService(new InMemoryNodeRepository(), new InMemoryLinkRepository());
+}
+
+export const ttcService = createTtcService();

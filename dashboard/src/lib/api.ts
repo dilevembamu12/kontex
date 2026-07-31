@@ -84,4 +84,24 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(node),
   }),
+
+  // Configuration LLM
+  getLlmConfig: () => apiFetch<Record<string, unknown>>('/config/llm'),
+  updateLlmConfig: (config: Record<string, unknown>) =>
+    apiFetch<{ success: boolean }>('/config/llm', {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    }),
+  testLlmConnection: (params: Record<string, unknown>) =>
+    apiFetch<Record<string, unknown>>('/config/llm/test', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+
+  // Import Markdown
+  importMarkdown: (body: { markdown: string; sourceUri?: string; sourceType?: string }) =>
+    apiFetch<Record<string, unknown>>('/nodes/import', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 };

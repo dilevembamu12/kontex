@@ -21,8 +21,8 @@ export async function getHealth(_request: Request, response: Response, next: Nex
     const uptimeSeconds = Math.floor((Date.now() - serverStartTime) / 1000);
     const healthReport = await getHealthReport(uptimeSeconds);
 
-    // Détermine le code HTTP selon l'état global
-    const httpStatus = healthReport.status === 'healthy' ? 200 : 503;
+    // Code HTTP : 200 si healthy ou degraded, 503 uniquement si unhealthy
+    const httpStatus = healthReport.status === 'unhealthy' ? 503 : 200;
 
     response.status(httpStatus).json(healthReport);
   } catch (error: unknown) {

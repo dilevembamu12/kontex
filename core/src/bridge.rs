@@ -13,6 +13,7 @@ use std::sync::Mutex;
 use crate::engine::anchoring::verify_node_anchoring;
 use crate::engine::coherence::auto_resolve_contradiction;
 use crate::engine::entropy::minimize_entropy;
+use crate::engine::field_solver::{self, TtcFieldState, TtcParameters};
 use crate::engine::propagation::propagate_context;
 use crate::node::{Anchor as RustAnchor, AnchorType as RustAnchorType, Node as RustNode, NodeKind as RustNodeKind};
 use crate::web::ContextWeb;
@@ -169,6 +170,37 @@ fn rust_node_to_js(node: &RustNode) -> JsNode {
         created_at: node.created_at.to_rfc3339(),
         updated_at: node.updated_at.to_rfc3339(),
     }
+}
+
+// ============================================================
+// Types TTC — Paramètres du Lagrangien MCW-1
+// ============================================================
+
+/// Paramètres du Lagrangien MCW-1 (5 paramètres libres).
+#[napi(object)]
+pub struct JsTtcParameters {
+    pub alpha: f64,
+    pub beta: f64,
+    pub lambda: f64,
+    pub v_gamma: f64,
+    pub v_tension: f64,
+}
+
+/// État des champs TTC pour un nœud.
+#[napi(object)]
+pub struct JsNodeFields {
+    pub node_id: String,
+    pub gamma: f64,
+    pub phi: f64,
+    pub tension: f64,
+}
+
+/// Résultat du solveur TTC.
+#[napi(object)]
+pub struct JsSolveResult {
+    pub iterations: u32,
+    pub converged: bool,
+    pub node_fields: Vec<JsNodeFields>,
 }
 
 // ============================================================
@@ -424,7 +456,7 @@ impl JsWeb {
         node_a: String,
         node_b: String,
     ) -> napi::Result<String> {
-        let mut web = self.web.lock().map_err(|e| {
+        let web = self.web.lock().map_err(|e| {
             napi::Error::from_reason(format!("Mutex lock failed: {e}"))
         })?;
 
@@ -435,19 +467,18 @@ impl JsWeb {
             napi::Error::from_reason(format!("UUID invalide : {e}"))
         })?;
 
-        auto_resolve_contradiction(&mut web, &uuid_a, &uuid_b)
-            .map_err(|e| napi::Error::from_reason(e))
+        Ok(auto_resolve_contradiction(&web, &uuid_a, &uuid_b))
     }
 
     /// Principe E_min — Minimise l'entropie de la toile.
     #[napi]
-    pub fn minimize_entropy(&self, max_iterations: u32) -> napi::Result<u32> {
+    pub fn minimize_entropy(&self, max_iterations: u32) -> napi::Result<f64> {
         let mut web = self.web.lock().map_err(|e| {
             napi::Error::from_reason(format!("Mutex lock failed: {e}"))
         })?;
 
-        let reduced = minimize_entropy(&mut web, max_iterations as usize);
-        Ok(reduced as u32)
+        let report = minimize_entropy(&mut web, max_iterations as usize);
+        Ok(report.global_entropy)
     }
 
     /// Statistiques globales de la toile.
@@ -487,6 +518,155 @@ impl JsWeb {
             contradiction_count: web.contradiction_count() as u32,
             global_entropy: entropy,
         })
+    }
+
+    // ============================================================
+    // Solveur TTC — Équations de champ physique
+    // ============================================================
+
+    /// Résout les équations de champ TTC (Γ, Φ, T) sur la toile.
+    ///
+    /// # Paramètres
+    /// - `params` : les 5 constantes du Lagrangien MCW-1
+    /// - `learning_rate` : pas de relaxation (ex: 0.1)
+    /// - `iterations` : nombre max d'itérations
+    ///
+    /// # Retour
+    /// L'état des champs pour chaque nœud après résolution.
+    #[napi]
+    pub fn solve_field_equations(
+        &self,
+        params: JsTtcParameters,
+        learning_rate: f64,
+        iterations: u32,
+    ) -> napi::Result<JsSolveResult> {
+        let web = self.web.lock().map_err(|e| {
+            napi::Error::from_reason(format!("Mutex lock failed: {e}"))
+        })?;
+
+        let ttc_params = TtcParameters {
+            alpha: params.alpha,
+            beta: params.beta,
+            lambda: params.lambda,
+            v_gamma: params.v_gamma,
+            v_tension: params.v_tension,
+        };
+
+        let (fields, history) = field_solver::solve_field_equations(
+            &web,
+            ttc_params,
+            learning_rate,
+            iterations as usize,
+        );
+
+        let node_fields: Vec<JsNodeFields> = fields
+            .nodes
+            .iter()
+            .map(|(id, f)| JsNodeFields {
+                node_id: id.to_string(),
+                gamma: f.gamma,
+                phi: f.phi,
+                tension: f.tension,
+            })
+            .collect();
+
+        Ok(JsSolveResult {
+            iterations: history.len() as u32,
+            converged: history.last().map(|h| h.converged).unwrap_or(false),
+            node_fields,
+        })
+    }
+
+    /// Retourne la tension topologique T d'un nœud après résolution des champs.
+    ///
+    /// La tension T est l'indicateur d'hallucination :
+    /// - T ≈ v_T (proche de 0) → cohérent avec la toile
+    /// - T ≫ v_T → contradiction topologique → hallucination probable
+    #[napi]
+    pub fn get_tension_residue(&self, node_id: String) -> napi::Result<f64> {
+        let uuid = uuid::Uuid::parse_str(&node_id).map_err(|e| {
+            napi::Error::from_reason(format!("UUID invalide : {e}"))
+        })?;
+
+        let web = self.web.lock().map_err(|e| {
+            napi::Error::from_reason(format!("Mutex lock failed: {e}"))
+        })?;
+
+        // Résout d'abord les équations de champ
+        let params = TtcParameters::default();
+        let (fields, _) = field_solver::solve_field_equations(&web, params, 0.1, 30);
+
+        // Récupère la tension du nœud
+        let tension = fields
+            .nodes
+            .get(&uuid)
+            .map(|f| f.tension)
+            .unwrap_or(0.0);
+
+        Ok(tension)
+    }
+
+    /// Retourne l'état complet des champs TTC pour tous les nœuds.
+    #[napi]
+    pub fn get_field_state(&self) -> napi::Result<Vec<JsNodeFields>> {
+        let web = self.web.lock().map_err(|e| {
+            napi::Error::from_reason(format!("Mutex lock failed: {e}"))
+        })?;
+
+        let params = TtcParameters::default();
+        let (fields, _) = field_solver::solve_field_equations(&web, params, 0.1, 30);
+
+        let result: Vec<JsNodeFields> = fields
+            .nodes
+            .iter()
+            .map(|(id, f)| JsNodeFields {
+                node_id: id.to_string(),
+                gamma: f.gamma,
+                phi: f.phi,
+                tension: f.tension,
+            })
+            .collect();
+
+        Ok(result)
+    }
+
+    /// Calcule le résidu de l'équation de tension sur une arête.
+    ///
+    /// □T - β(T-v_T) - λΓ² = 0
+    ///
+    /// Si le résidu est élevé, la connexion est en état de tension anormale.
+    #[napi]
+    pub fn get_edge_tension(
+        &self,
+        source_id: String,
+        target_id: String,
+    ) -> napi::Result<f64> {
+        let source_uuid = uuid::Uuid::parse_str(&source_id).map_err(|e| {
+            napi::Error::from_reason(format!("UUID source invalide : {e}"))
+        })?;
+        let target_uuid = uuid::Uuid::parse_str(&target_id).map_err(|e| {
+            napi::Error::from_reason(format!("UUID cible invalide : {e}"))
+        })?;
+
+        let web = self.web.lock().map_err(|e| {
+            napi::Error::from_reason(format!("Mutex lock failed: {e}"))
+        })?;
+
+        let params = TtcParameters::default();
+        let (fields, _) = field_solver::solve_field_equations(&web, params, 0.1, 30);
+
+        let weight = web
+            .outgoing_links(&source_uuid)
+            .iter()
+            .find(|l| l.target_id == target_uuid)
+            .map(|l| l.weight)
+            .unwrap_or(0.5);
+
+        let residue = crate::engine::coherence::tension_field_residue(
+            &fields, &source_uuid, &target_uuid, weight,
+        );
+
+        Ok(residue)
     }
 }
 
