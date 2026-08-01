@@ -16,7 +16,7 @@ let statusBarItem: vscode.StatusBarItem | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
     const config = vscode.workspace.getConfiguration('kontex');
-    const apiUrl = config.get<string>('apiUrl', 'http://localhost:3000');
+    const apiUrl = config.get<string>('apiUrl', 'http://localhost:3001');
 
     client = new KontExClient(apiUrl);
 
@@ -127,28 +127,27 @@ async function verifyHallucinationCommand(): Promise<void> {
                 const config = vscode.workspace.getConfiguration('kontex');
                 const threshold = config.get<number>('confidenceThreshold', 0.7);
 
-                if (report.isHallucination) {
-                    const suggestion = report.suggestions.length > 0
-                        ? `\n\nSuggestions :\n${report.suggestions.map((s: string) => `• ${s}`).join('\n')}`
-                        : '';
+                const t = report.tension ?? 1;
+                const v = report.verdict ?? (report.isHallucination ? 'hallucination' : 'coherent');
+                const sim = report.maxSimilarity ?? 0;
 
+                if (v === 'hallucination') {
                     void vscode.window.showWarningMessage(
-                        `⚠️ Hallucination détectée (confiance: ${(report.confidence * 100).toFixed(0)}%)` +
-                        `\n${report.contradictingNodeIds.length} nœud(s) en contradiction.${suggestion}`,
+                        `🔴 HALLUCINATION T=${(t*100).toFixed(0)}% (MCW-2) | ${report.similarNodesCount ?? '?'} nœuds similaires`,
                         { modal: false },
-                        'Voir le dashboard',
+                        'Dashboard',
                     ).then((action) => {
-                        if (action === 'Voir le dashboard') {
-                            void vscode.env.openExternal(vscode.Uri.parse('http://localhost:3001'));
+                        if (action === 'Dashboard') {
+                            void vscode.env.openExternal(vscode.Uri.parse('http://localhost:3000/detect'));
                         }
                     });
-                } else if (report.confidence >= threshold) {
+                } else if (v === 'coherent') {
                     void vscode.window.showInformationMessage(
-                        `✅ Cohérent avec la toile TTC (confiance: ${(report.confidence * 100).toFixed(0)}%)`,
+                        `🟢 COHÉRENT T=${(t*100).toFixed(0)}% (MCW-2)`,
                     );
                 } else {
                     void vscode.window.showInformationMessage(
-                        `🟡 Confiance faible (${(report.confidence * 100).toFixed(0)}%) — enrichir la toile.`,
+                        `🟡 INCONCLUSIF — maxSim ${(sim*100).toFixed(0)}% sous le seuil`,
                     );
                 }
             } catch (error: unknown) {

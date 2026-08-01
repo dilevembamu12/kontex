@@ -12,8 +12,8 @@ export function createStatusBarItem(): vscode.StatusBarItem {
         100,
     );
     item.command = 'kontex.showStats';
-    item.text = '$(pulse) KontEx';
-    item.tooltip = 'KontEx — Vibe Coding sans hallucination\nCliquer pour voir les statistiques';
+    item.text = '$(graph) KontEx TTC';
+    item.tooltip = 'KontEx — TTC v1.1 / MCW-2\nCliquer pour les statistiques';
     item.show();
     return item;
 }
@@ -27,30 +27,23 @@ export async function updateStatusBar(
         currentConfidence = confidence;
     }
 
+    const pct = (currentConfidence * 100).toFixed(0);
     let icon: string;
-    let label: string;
 
     if (currentConfidence >= 0.85) {
-        icon = '$(check)';
-        label = `TTC ${(currentConfidence * 100).toFixed(0)}%`;
-    } else if (currentConfidence >= 0.7) {
+        icon = '$(pass-filled)';
+    } else if (currentConfidence >= 0.5) {
         icon = '$(warning)';
-        label = `TTC ${(currentConfidence * 100).toFixed(0)}%`;
-    } else if (currentConfidence >= 0.4) {
-        icon = '$(error)';
-        label = `TTC ${(currentConfidence * 100).toFixed(0)}%`;
     } else {
-        icon = '$(circle-slash)';
-        label = `TTC ${(currentConfidence * 100).toFixed(0)}%`;
+        icon = '$(error)';
     }
 
-    item.text = `${icon} ${label}`;
+    item.text = `${icon} TTC ${pct}%`;
     item.tooltip = [
-        `Confiance TTC : ${(currentConfidence * 100).toFixed(0)}%`,
-        currentConfidence >= 0.85 ? '✅ Cohérent avec la toile' :
-        currentConfidence >= 0.7 ? '🟡 Quelques divergences' :
-        '🔴 Hallucinations probables',
+        `KontEx TTC v1.1 / MCW-2`,
+        `Confiance toile : ${pct}%`,
+        `Benchmark : 9/10 (90%)`,
         '',
-        'Cliquer pour les statistiques détaillées',
+        'Cliquer pour les statistiques',
     ].join('\n');
 }

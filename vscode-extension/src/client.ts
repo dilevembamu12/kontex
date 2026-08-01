@@ -27,6 +27,11 @@ export interface KontExStats {
 export interface HallucinationReport {
     isHallucination: boolean;
     confidence: number;
+    tension: number;
+    verdict: 'hallucination' | 'coherent' | 'inconclusive';
+    method: string;
+    maxSimilarity: number;
+    similarNodesCount: number;
     contradictingNodeIds: ReadonlyArray<string>;
     suggestions: ReadonlyArray<string>;
 }
