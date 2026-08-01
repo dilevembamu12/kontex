@@ -1,19 +1,15 @@
-@tailwind base;
+/* Désactive le reset Tailwind pour éviter les conflits avec Bootstrap */
+/* @tailwind base; */
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #0a0a0f;
-  --foreground: #e4e4e7;
-}
-
+/* Overrides KontEx pour le template Bootstrap */
 body {
-  background: #0a0a0f;
-  color: #e4e4e7;
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: var(--bs-body-font-family, 'Inter', sans-serif);
 }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: #18181b; }
-::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
+/* Cache le flash de contenu non stylé */
+.main-wrapper {
+  opacity: 1 !important;
+  visibility: visible !important;
+}

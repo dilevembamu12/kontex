@@ -107,40 +107,35 @@ export default function ConfigPage() {
     });
   }
 
-  if (loading) return <div className="p-8 text-gray-400">Chargement...</div>;
-  if (!config) return <div className="p-8 text-red-400">API inaccessible</div>;
+  if (loading) return <div className="text-muted">Chargement...</div>;
+  if (!config) return <div className="alert alert-danger">API inaccessible</div>;
 
-  return (
-    <div className="space-y-8 p-8 max-w-4xl">
-      {/* En-tête */}
-      <div>
-        <h1 className="text-2xl font-bold text-purple-400">⚙️ Configuration des LLMs</h1>
-        <p className="text-gray-500 mt-1">
-          Configurez les fournisseurs d'embedding et d'analyse utilisés par le moteur TTC.
+  return (<>
+    <div className="d-flex align-items-center justify-content-between mb-4">
+      <div><h4 className="mb-1">⚙️ Configuration des LLMs</h4>
+        <p className="text-muted mb-0">Configurez les fournisseurs d&apos;embedding et d&apos;analyse utilisés par le moteur TTC.</p></div>
+    </div>
+
+    {/* Message */}
+    {message && (
+      <div className={`alert ${message.startsWith('✅') ? 'alert-success' : 'alert-danger'}`}>{message}</div>
+    )}
+
+    {/* Section Embedding */}
+    <div className="card mb-4">
+      <div className="card-header">
+        <h5 className="card-title mb-0">🧬 Fournisseur d&apos;Embedding</h5>
+        <p className="card-text text-muted small mt-1 mb-0">
+          Génére les vecteurs sémantiques stockés dans pgvector. Utilisé pour initialiser Γ (cohérence) et w_ij (poids des liens).
         </p>
       </div>
-
-      {/* Message */}
-      {message && (
-        <div className={`p-4 rounded-lg text-sm ${message.startsWith('✅') ? 'bg-green-900/30 text-green-400 border border-green-800' : 'bg-red-900/30 text-red-400 border border-red-800'}`}>
-          {message}
-        </div>
-      )}
-
-      {/* Section Embedding */}
-      <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-cyan-400">🧬 Fournisseur d'Embedding</h2>
-        <p className="text-xs text-gray-500">
-          Génére les vecteurs sémantiques (1536d) stockés dans pgvector. Utilisé pour initialiser Γ (cohérence) et w_ij (poids des liens).
-        </p>
+      <div className="card-body">
 
         {/* Provider */}
         <Field label="Fournisseur">
-          <select
+          <select className="form-select"
             value={config.embedding.provider}
-            onChange={(e) => updateEmbedding('provider', e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-gray-200"
-          >
+            onChange={(e) => updateEmbedding('provider', e.target.value)}>
             {PROVIDERS.filter(p => p.value !== 'anthropic').map(p => (
               <option key={p.value} value={p.value}>{p.label}</option>
             ))}
@@ -150,70 +145,47 @@ export default function ConfigPage() {
         {config.embedding.provider !== 'none' && (
           <>
             <Field label="Clé API">
-              <input
-                type="password"
+              <input type="password" className="form-control font-monospace"
                 value={config.embedding.apiKey || ''}
                 onChange={(e) => updateEmbedding('apiKey', e.target.value)}
-                placeholder={
-                  config.embedding.provider === 'openai' ? 'sk-...' :
-                  config.embedding.provider === 'gemini' ? 'AIza...' :
-                  '(optionnel pour Ollama)'
-                }
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-gray-200 font-mono"
-              />
+                placeholder={config.embedding.provider === 'openai' ? 'sk-...' : config.embedding.provider === 'gemini' ? 'AIza...' : '(optionnel pour Ollama)'} />
             </Field>
 
             {(config.embedding.provider === 'ollama' || config.embedding.provider === 'gemini') && (
               <Field label={config.embedding.provider === 'gemini' ? 'URL API Gemini (optionnel)' : "URL de l'API Ollama"}>
-                <input
-                  type="text"
+                <input type="text" className="form-control font-monospace"
                   value={config.embedding.apiUrl || (config.embedding.provider === 'gemini' ? 'https://generativelanguage.googleapis.com' : 'http://localhost:11434')}
-                  onChange={(e) => updateEmbedding('apiUrl', e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-gray-200 font-mono"
-                />
+                  onChange={(e) => updateEmbedding('apiUrl', e.target.value)} />
               </Field>
             )}
 
             <Field label="Modèle">
-              <input
-                type="text"
+              <input type="text" className="form-control"
                 value={config.embedding.model}
-                onChange={(e) => updateEmbedding('model', e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-gray-200"
-              />
+                onChange={(e) => updateEmbedding('model', e.target.value)} />
             </Field>
 
             <Field label="Dimensions">
-              <input
-                type="number"
+              <input type="number" className="form-control"
                 value={config.embedding.dimensions}
-                onChange={(e) => updateEmbedding('dimensions', parseInt(e.target.value) || 1536)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-gray-200"
-              />
+                onChange={(e) => updateEmbedding('dimensions', parseInt(e.target.value) || 1536)} />
             </Field>
 
-            <div className="flex items-center gap-3">
-              <input
-                type="checkbox"
+            <div className="form-check mb-3">
+              <input className="form-check-input" type="checkbox"
                 checked={config.embedding.enabled}
-                onChange={(e) => updateEmbedding('enabled', e.target.checked)}
-                className="w-5 h-5 rounded bg-gray-800 border-gray-700"
-              />
-              <span className="text-gray-300">Activer ce fournisseur</span>
+                onChange={(e) => updateEmbedding('enabled', e.target.checked)} />
+              <label className="form-check-label">Activer ce fournisseur</label>
             </div>
 
             {/* Bouton Test */}
-            <button
-              onClick={testConnection}
-              disabled={testing}
-              className="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 rounded-lg text-sm font-medium transition"
-            >
-              {testing ? '⏳ Test en cours...' : '🔌 Tester la connexion'}
+            <button onClick={testConnection} disabled={testing} className="btn btn-info">
+              {testing ? <><span className="spinner-border spinner-border-sm me-1"></span>Test en cours...</> : '🔌 Tester la connexion'}
             </button>
 
             {/* Résultat du test */}
             {testResult && (
-              <div className={`p-3 rounded-lg text-sm ${testResult.success ? 'bg-green-900/30 text-green-400 border border-green-800' : 'bg-red-900/30 text-red-400 border border-red-800'}`}>
+              <div className={`alert ${testResult.success ? 'alert-success' : 'alert-danger'} mt-3`}>
                 {testResult.success
                   ? `✅ Connexion réussie — ${testResult.latencyMs}ms, ${testResult.sampleDimensions || '?'} dimensions`
                   : `❌ Échec : ${testResult.error || 'Erreur inconnue'}`}
@@ -221,21 +193,23 @@ export default function ConfigPage() {
             )}
           </>
         )}
-      </section>
+      </div>
+    </div>
 
-      {/* Section Analyse */}
-      <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-yellow-400">🧠 LLM d'Analyse</h2>
-        <p className="text-xs text-gray-500">
-          Modèle utilisé pour la détection avancée d'hallucination et la résolution de contradictions (Principe C).
+    {/* Section Analyse */}
+    <div className="card mb-4">
+      <div className="card-header">
+        <h5 className="card-title mb-0">🧠 LLM d&apos;Analyse</h5>
+        <p className="card-text text-muted small mt-1 mb-0">
+          Modèle utilisé pour la détection avancée d&apos;hallucination et la résolution de contradictions (Principe C).
         </p>
+      </div>
+      <div className="card-body">
 
         <Field label="Fournisseur">
-          <select
+          <select className="form-select"
             value={config.analysis.provider}
-            onChange={(e) => updateAnalysis('provider', e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-gray-200"
-          >
+            onChange={(e) => updateAnalysis('provider', e.target.value)}>
             {PROVIDERS.map(p => (
               <option key={p.value} value={p.value}>{p.label}</option>
             ))}
@@ -245,65 +219,48 @@ export default function ConfigPage() {
         {config.analysis.provider !== 'none' && (
           <>
             <Field label="Clé API">
-              <input
-                type="password"
+              <input type="password" className="form-control font-monospace"
                 value={config.analysis.apiKey || ''}
                 onChange={(e) => updateAnalysis('apiKey', e.target.value)}
-                placeholder="sk-..."
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-gray-200 font-mono"
-              />
+                placeholder="sk-..." />
             </Field>
 
             <Field label="Modèle">
-              <input
-                type="text"
+              <input type="text" className="form-control"
                 value={config.analysis.model}
-                onChange={(e) => updateAnalysis('model', e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-gray-200"
-              />
+                onChange={(e) => updateAnalysis('model', e.target.value)} />
             </Field>
 
-            <div className="flex items-center gap-3">
-              <input
-                type="checkbox"
+            <div className="form-check mb-3">
+              <input className="form-check-input" type="checkbox"
                 checked={config.analysis.enabled}
-                onChange={(e) => updateAnalysis('enabled', e.target.checked)}
-                className="w-5 h-5 rounded bg-gray-800 border-gray-700"
-              />
-              <span className="text-gray-300">Activer ce fournisseur</span>
+                onChange={(e) => updateAnalysis('enabled', e.target.checked)} />
+              <label className="form-check-label">Activer ce fournisseur</label>
             </div>
           </>
         )}
 
         <Field label="Prompt de détection">
-          <textarea
+          <textarea className="form-control font-monospace small"
             value={config.detectionPrompt || ''}
             onChange={(e) => setConfig({ ...config, detectionPrompt: e.target.value })}
-            rows={4}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-gray-200 font-mono text-sm"
-          />
+            rows={4} />
         </Field>
-      </section>
-
-      {/* Bouton Sauvegarder */}
-      <div className="flex gap-3">
-        <button
-          onClick={saveConfig}
-          disabled={saving}
-          className="px-6 py-3 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded-lg font-semibold transition"
-        >
-          {saving ? '⏳ Sauvegarde...' : '💾 Sauvegarder la configuration'}
-        </button>
       </div>
     </div>
-  );
+
+    {/* Bouton Sauvegarder */}
+    <button onClick={saveConfig} disabled={saving} className="btn btn-purple btn-lg">
+      {saving ? <><span className="spinner-border spinner-border-sm me-1"></span>Sauvegarde...</> : '💾 Sauvegarder la configuration'}
+    </button>
+  </>);
 }
 
 /** Composant champ de formulaire */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-1">
-      <label className="text-sm text-gray-400">{label}</label>
+    <div className="mb-3">
+      <label className="form-label text-muted">{label}</label>
       {children}
     </div>
   );

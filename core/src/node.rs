@@ -118,6 +118,23 @@ impl Node {
         }
     }
 
+    /// Construit un nœud avec un ID spécifique.
+    /// Utilisé pour la synchronisation PG → Rust (l'UUID est déjà attribué).
+    pub fn new_with_id(
+        id: Uuid,
+        kind: NodeKind,
+        content: String,
+        weight: f64,
+        ambiguity: f64,
+        sources: Vec<Anchor>,
+    ) -> Self {
+        assert!((0.0..=1.0).contains(&weight));
+        assert!((0.0..=1.0).contains(&ambiguity));
+        assert!(!sources.is_empty());
+        let now = Utc::now();
+        Self { id, kind, content, weight, ambiguity, sources, metadata: HashSet::new(), created_at: now, updated_at: now }
+    }
+
     /// Vérifie si le nœud satisfait le Principe d'Ancrage.
     /// Fonction pure (E2).
     pub fn is_anchored(&self) -> bool {

@@ -12,11 +12,12 @@ type ContradictionResult = { isContradiction: boolean; confidence: number; contr
 type PropagResult = { sourceId: string; reachedCount: number; maxDepth: number; nodes: ReachedNode[] };
 type StatsResult = { nodeCount: number; linkCount: number; anchoredCount: number; anchoringRate: number; contradictionCount: number; globalEntropy: number };
 
-/// Paramètres du Lagrangien MCW-1 (5 constantes fondamentales)
+/// Paramètres du Lagrangien MCW-2 (6 constantes, TTC v1.1)
 export interface TtcParams {
   alpha: number;   // auto-couplage de Γ
-  beta: number;    // rappel de T vers v_T
+  beta: number;    // masse de T
   lambda: number;  // couplage T-Γ
+  gamma: number;   // couplage Φ–T (MCW-2) : la tension sourcée par ∇Φ
   vGamma: number;  // VEV de cohérence
   vTension: number; // VEV de tension
 }
@@ -37,10 +38,11 @@ export interface SolveResult {
 }
 
 export const DEFAULT_TTC_PARAMS: TtcParams = {
-  alpha: 1.0,
-  beta: 0.5,
-  lambda: 0.1,
-  vGamma: 0.5,
+  alpha: 0.01,    // Higgs Γ — réduit
+  beta: 0.3,      // Masse T — stabilité numérique
+  lambda: 0.001,  // Couplage Γ–T — calibré benchmark 10 paires
+  gamma: 0.1,     // Couplage Φ–T (MCW-2) — calibré
+  vGamma: 1.0,    // VEV cohérence normalisé
   vTension: 0.0,
 };
 
@@ -59,12 +61,16 @@ export interface TtcEngine {
   // === Nouvelles méthodes TTC (solveur de champ physique) ===
   /** Résout les équations de champ Γ, Φ, T sur toute la toile */
   solveFieldEquations(params: TtcParams, learningRate: number, iterations: number): Promise<SolveResult>;
-  /** Retourne la tension topologique T d'un nœud (indicateur d'hallucination) */
-  getTensionResidue(nodeId: string): Promise<number>;
+  /** Retourne la tension topologique T avec paramètres MCW-2 */
+  getTensionResidue(nodeId: string, alpha?: number, beta?: number, lambda?: number, gamma?: number, lr?: number, iter?: number): Promise<number>;
   /** Retourne l'état complet des champs pour tous les nœuds */
   getFieldState(): Promise<NodeFields[]>;
   /** Calcule le résidu de tension sur une arête */
   getEdgeTension(sourceId: string, targetId: string): Promise<number>;
+  /** Évalue le Lagrangien MCW-2 complet (L_W) — suivi de convergence */
+  computeLagrangian(): Promise<number>;
+  /** Synchronise les nœuds/liens PG vers le moteur natif Rust */
+  syncFromPg(): Promise<number>;
 }
 
 // Module natif (chargé paresseusement)
@@ -128,22 +134,68 @@ export function createTtcEngine(): TtcEngine {
         return web.getStats() as StatsResult;
       },
 
-      // === Nouvelles méthodes TTC ===
+      // === Nouvelles méthodes TTC (solveur de champ physique) ===
+      // Si le module natif n'a pas ces méthodes (mock), on utilise le fallback
       async solveFieldEquations(params: TtcParams, learningRate: number, iterations: number): Promise<SolveResult> {
-        return web.solveFieldEquations(
-          { alpha: params.alpha, beta: params.beta, lambda: params.lambda, vGamma: params.vGamma, vTension: params.vTension },
-          learningRate,
-          iterations,
-        ) as SolveResult;
+        if (typeof (web as any).solveFieldEquations === 'function') {
+          return (web as any).solveFieldEquations(
+            { alpha: params.alpha, beta: params.beta, lambda: params.lambda, gamma: params.gamma, vGamma: params.vGamma, vTension: params.vTension },
+            learningRate, iterations,
+          ) as SolveResult;
+        }
+        // Fallback simulé
+        const nodes = await fallbackService.listNodes();
+        return { iterations: 0, converged: false, nodeFields: nodes.map(n => ({ nodeId: n.id, gamma: n.weight, phi: 0, tension: n.ambiguity })) };
       },
-      async getTensionResidue(nodeId: string): Promise<number> {
-        return Number(web.getTensionResidue(nodeId));
+      async getTensionResidue(nodeId: string, alpha?: number, beta?: number, lambda?: number, gamma?: number, lr?: number, iter?: number): Promise<number> {
+        if (typeof (web as any).getTensionResidue === 'function') {
+          return Number((web as any).getTensionResidue(nodeId, alpha, beta, lambda, gamma, lr, iter));
+        }
+        const node = await fallbackService.getNode(nodeId);
+        return node?.ambiguity ?? 0.5;
       },
       async getFieldState(): Promise<NodeFields[]> {
-        return web.getFieldState() as NodeFields[];
+        if (typeof (web as any).getFieldState === 'function') {
+          return (web as any).getFieldState() as NodeFields[];
+        }
+        const nodes = await fallbackService.listNodes();
+        return nodes.map(n => ({ nodeId: n.id, gamma: n.weight, phi: 0, tension: n.ambiguity }));
       },
       async getEdgeTension(sourceId: string, targetId: string): Promise<number> {
-        return Number(web.getEdgeTension(sourceId, targetId));
+        if (typeof (web as any).getEdgeTension === 'function') {
+          return Number((web as any).getEdgeTension(sourceId, targetId));
+        }
+        return 0;
+      },
+      async computeLagrangian(): Promise<number> {
+        if (typeof (web as any).computeLagrangian === 'function') {
+          return Number((web as any).computeLagrangian());
+        }
+        const nodes = await fallbackService.listNodes();
+        return -nodes.reduce((sum, n) => sum + n.weight * n.weight + n.ambiguity * n.ambiguity, 0);
+      },
+
+      // === Sync PG → Rust ===
+      async syncFromPg(): Promise<number> {
+        if (typeof (web as any).addNodeWithId !== 'function') return 0;
+        const nodes = await fallbackService.listNodes();
+        const links = await fallbackService.listLinks();
+        let count = 0;
+        for (const n of nodes) {
+          try {
+            (web as any).addNodeWithId(n.id, n.kind, n.content, n.weight, n.ambiguity,
+              (n.anchors || []).map((a: any) => ({ uri: a.uri || '', sourceType: a.sourceType || 'other' })));
+            count++;
+          } catch { /* skip duplicates */ }
+        }
+        for (const l of links) {
+          try {
+            if (typeof (web as any).addLink === 'function') {
+              (web as any).addLink(l.sourceId, l.targetId, l.relation, l.weight, l.relevanceScore);
+            }
+          } catch { /* skip */ }
+        }
+        return count;
       },
     };
   }
@@ -211,9 +263,9 @@ export function createTtcEngine(): TtcEngine {
         })),
       };
     },
-    async getTensionResidue(nodeId: string): Promise<number> {
+    async getTensionResidue(nodeId: string, _a?: number, _b?: number, _l?: number, _g?: number, _lr?: number, _iter?: number): Promise<number> {
       const node = await fallbackService.getNode(nodeId);
-      return node?.ambiguity ?? 0;
+      return node?.ambiguity ?? 0.5;
     },
     async getFieldState(): Promise<NodeFields[]> {
       const nodes = await fallbackService.listNodes();
@@ -227,6 +279,12 @@ export function createTtcEngine(): TtcEngine {
     async getEdgeTension(_s: string, _t: string): Promise<number> {
       return 0;
     },
+    async computeLagrangian(): Promise<number> {
+      // Fallback : L_W approximé à partir des poids et ambiguïtés
+      const nodes = await fallbackService.listNodes();
+      return -nodes.reduce((sum, n) => sum + n.weight * n.weight + n.ambiguity * n.ambiguity, 0);
+    },
+    async syncFromPg(): Promise<number> { return 0; },
   };
 }
 

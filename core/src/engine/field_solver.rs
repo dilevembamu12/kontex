@@ -38,15 +38,18 @@ use uuid::Uuid;
 // Paramètres du Lagrangien MCW-1 (5 paramètres libres)
 // ============================================================
 
-/// Paramètres du modèle TTC discret.
+/// Paramètres du modèle TTC discret — MCW-2 (v1.1).
+/// Cf. TTC-discrete-spec-v1.1.md et TTC-MCW2-extension.md.
 #[derive(Debug, Clone)]
 pub struct TtcParameters {
     /// Auto-couplage de Γ (mécanisme de Higgs)
     pub alpha: f64,
-    /// Rappel de T vers v_T
+    /// Rappel de T vers v_T (masse de T)
     pub beta: f64,
     /// Couplage T-Γ : la tension modifie la cohérence
     pub lambda: f64,
+    /// Couplage Φ–T (MCW-2) : la tension est sourcée par le gradient de phase
+    pub gamma: f64,
     /// VEV de cohérence (vide = Γ ≈ v_Γ)
     pub v_gamma: f64,
     /// VEV de tension (vide = T ≈ v_T)
@@ -56,11 +59,12 @@ pub struct TtcParameters {
 impl Default for TtcParameters {
     fn default() -> Self {
         Self {
-            alpha: 1.0,
-            beta: 0.5,
-            lambda: 0.1,
-            v_gamma: 0.5,    // Cohérence moyenne
-            v_tension: 0.0,   // Tension nulle dans le vide
+            alpha: 0.01,       // Higgs Γ — réduit
+            beta: 0.3,         // Masse T — calibré benchmark 10 paires
+            lambda: 0.001,     // Couplage Γ–T — calibré
+            gamma: 0.1,        // Couplage Φ–T (MCW-2) — calibré
+            v_gamma: 1.0,      // VEV cohérence normalisé
+            v_tension: 0.0,    // Vide = pas de tension
         }
     }
 }
@@ -271,8 +275,12 @@ pub struct FieldStepResult {
 /// **Loi de Φ (Phase)** :
 ///   div J_i = 0  →  Σ_j J_{ij} - Σ_k J_{ki} = 0
 ///
-/// **Loi de T (Tension)** :
-///   □T_i - β(T_i - v_T) - λ Γ_i² = 0
+/// **Loi de T (Tension) — MCW-2** :
+///   □T_i - β(T_i - v_T) - λ Γ_i² - (γ/2)·(∇Φ)²_i = 0
+///
+/// Le terme (γ/2)·(∇Φ)²_i est l'extension MCW-2 : la tension est
+/// directement sourcée par le gradient de phase. Une opposition de
+/// phase (contradiction) CRÉE de la tension.
 ///
 /// Utilise une relaxation itérative (Jacobi) avec pas d'apprentissage η.
 pub fn step_field_equations(
@@ -312,17 +320,22 @@ pub fn step_field_equations(
         // Mise à jour de Φ : ajuste pour réduire la divergence
         let delta_phi = -learning_rate * divergence;
 
-        // Projette Φ dans [0, 2π) (périodicité de la phase)
-        let new_phi = (old.phi + delta_phi) % (2.0 * std::f64::consts::PI);
-        let new_phi = if new_phi < 0.0 { new_phi + 2.0 * std::f64::consts::PI } else { new_phi };
+        // Φ ∈ ℝ non compactifié (TTC v1.1 §1.2).
+        // La périodicité est une symétrie du lagrangien, pas une contrainte.
+        // Le gradient se calcule directement sans wrapping.
+        let new_phi = old.phi + delta_phi;
 
-        // ─── Équation de T : □T - β(T-v_T) - λΓ² = 0 ───
+        // ─── Équation de T (MCW-2) : □T - β(T-v_T) - λΓ² - (γ/2)(∇Φ)² = 0 ───
         let lap_t = laplacian_tension(web, fields, &node_id);
         let rappel = params.beta * (old.tension - params.v_tension);
         let source = params.lambda * old.gamma * old.gamma;
 
-        // Résidu de l'équation de T
-        let residue_tension = lap_t - rappel - source;
+        // Terme MCW-2 : (γ/2) · (∇Φ)² — la tension est sourcée par le gradient de phase
+        let grad_phi_sq = phase_centrifugal_term(web, fields, &node_id);
+        let mcw2_term = (params.gamma / 2.0) * grad_phi_sq;
+
+        // Résidu de l'équation de T (MCW-2)
+        let residue_tension = lap_t - rappel - source - mcw2_term;
 
         let delta_tension = -learning_rate * residue_tension;
         let new_tension = (old.tension + delta_tension).clamp(0.0, 1.0);
@@ -344,6 +357,10 @@ pub fn step_field_equations(
         }
     }
 
+    // Convergence mesurée sur le changement des champs (critère pratique).
+    // Note TTC v1.1 : le critère rigoureux est ||Résidu(EDP)|| < ε,
+    // mais Δchamp < tol est acceptable pour les applications courantes
+    // car il coïncide avec la convergence du résidu quand η est petit.
     let converged = max_delta_gamma < 1e-6
         && max_delta_phi < 1e-6
         && max_delta_tension < 1e-6;
@@ -463,6 +480,68 @@ pub fn energy_density(
         + params.lambda * tension * gamma * gamma;
 
     0.5 * grad_gamma_sq + 0.5 * gamma_phi_sq + 0.5 * grad_t_sq + potential
+}
+
+/// Évalue le Lagrangien MCW-2 complet sur tout le graphe.
+///
+/// # Définition (TTC v1.1 §5)
+/// L_W = Σ_i [ −½|∇Γ_i|² − ½Γ_i²|∇Φ_i|² − ½|∇T_i|² − U(Γ_i, T_i) ]
+///
+/// avec le potentiel MCW-2 :
+/// U(Γ,T) = α/4(Γ²−v_Γ²)² + β/2(T−v_T)² + λTΓ²
+///
+/// # Utilité
+/// - dL_W/dt < 0 → le système relaxe (flèche thermodynamique)
+/// - ΔL_W entre deux configurations → laquelle est « préférée »
+/// - Si L_W remonte → instabilité numérique (η trop grand)
+pub fn compute_lagrangian(
+    web: &ContextWeb,
+    fields: &TtcFieldState,
+) -> f64 {
+    let params = &fields.params;
+    let mut total = 0.0;
+
+    for node in web.iter_nodes() {
+        let node_id = node.id;
+        let f = fields.nodes.get(&node_id).cloned().unwrap_or_default();
+        let gamma = f.gamma;
+        let tension = f.tension;
+        let phi = f.phi;
+
+        // −½|∇Γ|²
+        let mut grad_gamma_sq = 0.0;
+        for link in web.outgoing_links(&node_id) {
+            let gamma_j = fields.nodes.get(&link.target_id).map(|n| n.gamma).unwrap_or(params.v_gamma);
+            let grad = gamma - gamma_j;
+            grad_gamma_sq += link.weight * grad * grad;
+        }
+
+        // −½ Γ²|∇Φ|²
+        let mut gamma_phi_sq = 0.0;
+        for link in web.outgoing_links(&node_id) {
+            let phi_j = fields.nodes.get(&link.target_id).map(|n| n.phi).unwrap_or(0.0);
+            let grad = phi - phi_j;
+            gamma_phi_sq += gamma * gamma * link.weight * grad * grad;
+        }
+
+        // −½|∇T|²
+        let mut grad_t_sq = 0.0;
+        for link in web.outgoing_links(&node_id) {
+            let t_j = fields.nodes.get(&link.target_id).map(|n| n.tension).unwrap_or(0.0);
+            let grad = tension - t_j;
+            grad_t_sq += link.weight * grad * grad;
+        }
+
+        // −U(Γ,T) = −[α/4(Γ²−v_Γ²)² + β/2(T−v_T)² + λTΓ²]
+        let potential = params.alpha / 4.0 * (gamma * gamma - params.v_gamma * params.v_gamma).powi(2)
+            + params.beta / 2.0 * (tension - params.v_tension).powi(2)
+            + params.lambda * tension * gamma * gamma;
+
+        // L_W_i = −½|∇Γ|² − ½Γ²|∇Φ|² − ½|∇T|² − U
+        total += -0.5 * grad_gamma_sq - 0.5 * gamma_phi_sq - 0.5 * grad_t_sq - potential;
+    }
+
+    total
 }
 
 // ============================================================

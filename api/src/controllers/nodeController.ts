@@ -6,6 +6,21 @@ import { ttcService } from '../services/ttcService.js';
 import { cacheService } from '../services/cacheService.js';
 import type { AnchorInput } from '../services/ttcService.js';
 
+/**
+ * DELETE /nodes/:id — Supprime un nœud et tous ses liens.
+ */
+export async function deleteNode(request: Request, response: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = request.params;
+    const result = await ttcService.deleteNode(id);
+    const tenantId = extractTenantId(request);
+    cacheService.invalidateResources(tenantId, ['nodes', 'stats', 'links']).catch(() => {});
+    response.json({ deleted: result.nodeDeleted, linksRemoved: result.linksDeleted });
+  } catch (error: unknown) {
+    next(error);
+  }
+}
+
 /** Extrait le tenant ID du header (cohérent avec cacheMiddleware). */
 function extractTenantId(request: Request): string {
   const headerValue = request.headers['x-tenant-id'];
@@ -14,6 +29,43 @@ function extractTenantId(request: Request): string {
     return raw.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64) || 'default_tenant';
   }
   return 'default_tenant';
+}
+
+/**
+ * Extrait les mots-clés significatifs d'un texte.
+ * Filtre les stop words français/anglais et les tokens courts.
+ */
+function extractKeywords(text: string): Set<string> {
+  const STOP_WORDS = new Set([
+    'le', 'la', 'les', 'un', 'une', 'des', 'de', 'du', 'à', 'au', 'aux',
+    'et', 'ou', 'en', 'sur', 'dans', 'par', 'pour', 'avec', 'sans', 'ce',
+    'cette', 'ces', 'est', 'sont', 'être', 'avoir', 'fait', 'faire',
+    'the', 'a', 'an', 'is', 'are', 'be', 'to', 'of', 'in', 'for', 'on',
+    'with', 'and', 'or', 'it', 'as', 'at', 'by', 'from', 'this', 'that',
+    'pas', 'plus', 'très', 'tout', 'tous', 'toute', 'toutes', 'leur',
+    'leurs', 'son', 'sa', 'ses', 'notre', 'nos', 'votre', 'vos',
+    'qui', 'que', 'quoi', 'dont', 'où', 'comment', 'quand',
+  ]);
+
+  const tokens = text
+    .toLowerCase()
+    .replace(/[#*_`\[\](){}|\\><~]/g, ' ')  // retire la ponctuation markdown
+    .replace(/[.,;:!?]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length >= 3 && !STOP_WORDS.has(t));
+
+  return new Set(tokens);
+}
+
+/**
+ * Calcule le coefficient de Jaccard entre deux ensembles de mots-clés.
+ * Retourne une valeur entre 0 (aucun mot commun) et 1 (identiques).
+ */
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  const intersection = new Set([...a].filter(x => b.has(x)));
+  const union = new Set([...a, ...b]);
+  return intersection.size / union.size;
 }
 
 /**
@@ -177,14 +229,15 @@ export async function importMarkdown(request: Request, response: Response, next:
       return;
     }
 
-    const created: Array<{ id: string; section: string; kind: string }> = [];
+    const created: Array<{ id: string; section: string; kind: string; content: string }> = [];
     const errors: string[] = [];
 
     for (const section of sections) {
       try {
+        const nodeContent = `[${section.section}] ${section.content.slice(0, 2000)}`;
         const node = await ttcService.addNode({
           kind: section.kind,
-          content: `[${section.section}] ${section.content.slice(0, 2000)}`,
+          content: nodeContent,
           weight: 0.7,
           ambiguity: 0.3,
           anchors: [
@@ -193,9 +246,53 @@ export async function importMarkdown(request: Request, response: Response, next:
           ],
           metadata: { source: uri, section: section.section, importedAt: new Date().toISOString() },
         });
-        created.push({ id: node.id, section: section.section, kind: section.kind });
+        created.push({ id: node.id, section: section.section, kind: section.kind, content: nodeContent });
       } catch (err) {
         errors.push(`${section.section}: ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+      }
+    }
+
+    // === TISSAGE AUTOMATIQUE ===
+    // Crée des liens entre sections similaires via similarité de mots-clés (Jaccard)
+    let linksCreated = 0;
+    const LINK_THRESHOLD = 0.12; // seuil de similarité Jaccard (12% de mots en commun)
+    const MAX_LINKS = 200;       // éviter l'explosion combinatoire
+
+    if (created.length >= 2) {
+      const nodeKeywords: Map<string, Set<string>> = new Map();
+      for (const n of created) {
+        nodeKeywords.set(n.id, extractKeywords(n.content));
+      }
+
+      const pairs: Array<{ source: string; target: string; score: number }> = [];
+      for (let i = 0; i < created.length; i++) {
+        for (let j = i + 1; j < created.length; j++) {
+          const ki = nodeKeywords.get(created[i].id)!;
+          const kj = nodeKeywords.get(created[j].id)!;
+          const sim = jaccardSimilarity(ki, kj);
+          if (sim >= LINK_THRESHOLD) {
+            pairs.push({ source: created[i].id, target: created[j].id, score: sim });
+          }
+        }
+      }
+
+      // Trier par similarité décroissante et limiter
+      pairs.sort((a, b) => b.score - a.score);
+      const topPairs = pairs.slice(0, MAX_LINKS);
+
+      for (const pair of topPairs) {
+        try {
+          await ttcService.addLink({
+            sourceId: pair.source,
+            targetId: pair.target,
+            relation: 'references',
+            weight: Math.min(pair.score * 5, 3.0),
+            relevanceScore: pair.score,
+          });
+          linksCreated++;
+        } catch {
+          // ignore les liens en double ou invalides
+        }
       }
     }
 
@@ -206,8 +303,80 @@ export async function importMarkdown(request: Request, response: Response, next:
     response.status(201).json({
       imported: created.length,
       total: sections.length,
-      nodes: created,
+      nodes: created.map(n => ({ id: n.id, section: n.section, kind: n.kind })),
+      linksCreated,
       errors: errors.length > 0 ? errors : undefined,
+    });
+  } catch (error: unknown) {
+    next(error);
+  }
+}
+
+/**
+ * POST /nodes/weave — Tisse des liens entre tous les nœuds existants
+ * via similarité de mots-clés (Jaccard). Utilitaire pour rétro-activement
+ * lier les nœuds importés sans tissage initial.
+ */
+export async function weaveAllNodes(request: Request, response: Response, next: NextFunction): Promise<void> {
+  try {
+    const allNodes = await ttcService.listNodes();
+    if (allNodes.length < 2) {
+      response.json({ linksCreated: 0, message: 'Pas assez de nœuds (min. 2 requis).' });
+      return;
+    }
+
+    // Extraire les mots-clés de chaque nœud
+    const nodeKeywords: Map<string, Set<string>> = new Map();
+    for (const node of allNodes) {
+      nodeKeywords.set(node.id, extractKeywords(node.content));
+    }
+
+    const LINK_THRESHOLD = 0.12;
+    const MAX_LINKS = 500;
+
+    const pairs: Array<{ source: string; target: string; score: number }> = [];
+    const ids = allNodes.map(n => n.id);
+
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const ki = nodeKeywords.get(ids[i])!;
+        const kj = nodeKeywords.get(ids[j])!;
+        if (ki.size === 0 || kj.size === 0) continue;
+        const sim = jaccardSimilarity(ki, kj);
+        if (sim >= LINK_THRESHOLD) {
+          pairs.push({ source: ids[i], target: ids[j], score: sim });
+        }
+      }
+    }
+
+    pairs.sort((a, b) => b.score - a.score);
+    const topPairs = pairs.slice(0, MAX_LINKS);
+
+    let linksCreated = 0;
+    for (const pair of topPairs) {
+      try {
+        await ttcService.addLink({
+          sourceId: pair.source,
+          targetId: pair.target,
+          relation: 'references',
+          weight: Math.min(pair.score * 5, 3.0),
+          relevanceScore: pair.score,
+        });
+        linksCreated++;
+      } catch {
+        // ignore duplicates
+      }
+    }
+
+    // Invalide le cache
+    const tenantId = extractTenantId(request);
+    cacheService.invalidateResources(tenantId, ['nodes', 'stats']).catch(() => {});
+
+    response.json({
+      linksCreated,
+      totalNodes: allNodes.length,
+      threshold: LINK_THRESHOLD,
+      message: `${linksCreated} liens créés entre ${allNodes.length} nœuds (seuil Jaccard: ${LINK_THRESHOLD}).`,
     });
   } catch (error: unknown) {
     next(error);

@@ -13,6 +13,7 @@ export interface NodeRepository {
   findById(id: string): Promise<StoredNode | null>;
   findAll(): Promise<StoredNode[]>;
   count(): Promise<number>;
+  delete(id: string): Promise<boolean>;
   /** Trouve les N nœuds les plus similaires via cosine similarity pgvector */
   findSimilar(embedding: Float32Array, limit: number): Promise<Array<{ id: string; content: string; similarity: number }>>;
 }
@@ -164,6 +165,13 @@ export class PostgresNodeRepository implements NodeRepository {
       similarity: Number(row['similarity']),
     }));
   }
+
+  async delete(id: string): Promise<boolean> {
+    const pool = await this.getPool();
+    await pool.query('DELETE FROM anchors WHERE node_id=$1', [id]);
+    const result = await pool.query('DELETE FROM nodes WHERE id=$1', [id]);
+    return (result.rowCount ?? 0) > 0;
+  }
 }
 
 /**
@@ -194,5 +202,9 @@ export class InMemoryNodeRepository implements NodeRepository {
     return [...this.nodes.values()]
       .slice(0, limit)
       .map((n) => ({ id: n.id, content: n.content, similarity: 0.5 }));
+  }
+
+  async delete(id: string): Promise<boolean> {
+    return this.nodes.delete(id);
   }
 }

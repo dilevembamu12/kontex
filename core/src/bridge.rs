@@ -176,12 +176,13 @@ fn rust_node_to_js(node: &RustNode) -> JsNode {
 // Types TTC — Paramètres du Lagrangien MCW-1
 // ============================================================
 
-/// Paramètres du Lagrangien MCW-1 (5 paramètres libres).
+/// Paramètres du Lagrangien MCW-2 (6 paramètres libres, TTC v1.1).
 #[napi(object)]
 pub struct JsTtcParameters {
     pub alpha: f64,
     pub beta: f64,
     pub lambda: f64,
+    pub gamma: f64,
     pub v_gamma: f64,
     pub v_tension: f64,
 }
@@ -223,8 +224,7 @@ impl JsWeb {
         }
     }
 
-    /// Ajoute un nœud à la toile.
-    /// Retourne l'UUID du nœud créé.
+    /// Ajoute un nœud à la toile. Retourne l'UUID généré.
     #[napi]
     pub fn add_node(
         &self,
@@ -239,37 +239,70 @@ impl JsWeb {
             "rule" => RustNodeKind::Rule,
             "code" => RustNodeKind::Code,
             "documentation" => RustNodeKind::Documentation,
-            _ => {
-                return Err(napi::Error::from_reason(format!(
-                    "NodeKind invalide : {kind}"
-                )))
-            }
+            _ => return Err(napi::Error::from_reason(format!("NodeKind invalide : {kind}")))
         };
-
-        let rust_anchors: Vec<RustAnchor> = anchors
-            .iter()
-            .map(|a| RustAnchor {
-                uri: a.uri.clone(),
-                source_type: match a.source_type.as_str() {
-                    "official_documentation" => RustAnchorType::OfficialDocumentation,
-                    "test_case" => RustAnchorType::TestCase,
-                    "specification" => RustAnchorType::Specification,
-                    "code_repository" => RustAnchorType::CodeRepository,
-                    "peer_review" => RustAnchorType::PeerReview,
-                    _ => RustAnchorType::Other(a.source_type.clone()),
-                },
-                anchored_at: chrono::Utc::now(),
-            })
-            .collect();
-
+        let rust_anchors: Vec<RustAnchor> = anchors.iter().map(|a| RustAnchor {
+            uri: a.uri.clone(),
+            source_type: match a.source_type.as_str() {
+                "official_documentation" => RustAnchorType::OfficialDocumentation,
+                "test_case" => RustAnchorType::TestCase,
+                "specification" => RustAnchorType::Specification,
+                "code_repository" => RustAnchorType::CodeRepository,
+                "peer_review" => RustAnchorType::PeerReview,
+                _ => RustAnchorType::Other(a.source_type.clone()),
+            },
+            anchored_at: chrono::Utc::now(),
+        }).collect();
         let node = RustNode::new(rust_kind, content, weight, ambiguity, rust_anchors);
         let id = node.id.to_string();
+        let mut web = self.web.lock().map_err(|e| napi::Error::from_reason(format!("Mutex: {e}")))?;
+        web.add_node(node);
+        Ok(id)
+    }
+
+    /// Ajoute un nœud avec un ID explicite (sync PG → Rust).
+    #[napi]
+    pub fn add_node_with_id(
+        &self,
+        id: String,
+        kind: String,
+        content: String,
+        weight: f64,
+        ambiguity: f64,
+        anchors: Vec<JsAnchor>,
+    ) -> napi::Result<()> {
+        let rust_kind = match kind.as_str() {
+            "fact" => RustNodeKind::Fact,
+            "rule" => RustNodeKind::Rule,
+            "code" => RustNodeKind::Code,
+            "documentation" => RustNodeKind::Documentation,
+            _ => return Err(napi::Error::from_reason(format!("NodeKind invalide : {kind}")))
+        };
+
+        let node_id = uuid::Uuid::parse_str(&id).map_err(|e| {
+            napi::Error::from_reason(format!("UUID invalide : {e}"))
+        })?;
+
+        let rust_anchors: Vec<RustAnchor> = anchors.iter().map(|a| RustAnchor {
+            uri: a.uri.clone(),
+            source_type: match a.source_type.as_str() {
+                "official_documentation" => RustAnchorType::OfficialDocumentation,
+                "test_case" => RustAnchorType::TestCase,
+                "specification" => RustAnchorType::Specification,
+                "code_repository" => RustAnchorType::CodeRepository,
+                "peer_review" => RustAnchorType::PeerReview,
+                _ => RustAnchorType::Other(a.source_type.clone()),
+            },
+            anchored_at: chrono::Utc::now(),
+        }).collect();
+
+        let node = RustNode::new_with_id(node_id, rust_kind, content, weight, ambiguity, rust_anchors);
+
         let mut web = self.web.lock().map_err(|e| {
             napi::Error::from_reason(format!("Mutex lock failed: {e}"))
         })?;
         web.add_node(node);
-
-        Ok(id)
+        Ok(())
     }
 
     /// Récupère un nœud par ID.
@@ -548,6 +581,7 @@ impl JsWeb {
             alpha: params.alpha,
             beta: params.beta,
             lambda: params.lambda,
+            gamma: params.gamma,
             v_gamma: params.v_gamma,
             v_tension: params.v_tension,
         };
@@ -577,13 +611,19 @@ impl JsWeb {
         })
     }
 
-    /// Retourne la tension topologique T d'un nœud après résolution des champs.
-    ///
-    /// La tension T est l'indicateur d'hallucination :
-    /// - T ≈ v_T (proche de 0) → cohérent avec la toile
-    /// - T ≫ v_T → contradiction topologique → hallucination probable
+    /// Retourne la tension topologique T d'un nœud après résolution MCW-2.
+    /// Accepte les paramètres du Lagrangien pour calibration.
     #[napi]
-    pub fn get_tension_residue(&self, node_id: String) -> napi::Result<f64> {
+    pub fn get_tension_residue(
+        &self,
+        node_id: String,
+        alpha: Option<f64>,
+        beta: Option<f64>,
+        lambda: Option<f64>,
+        gamma: Option<f64>,
+        learning_rate: Option<f64>,
+        iterations: Option<u32>,
+    ) -> napi::Result<f64> {
         let uuid = uuid::Uuid::parse_str(&node_id).map_err(|e| {
             napi::Error::from_reason(format!("UUID invalide : {e}"))
         })?;
@@ -592,17 +632,20 @@ impl JsWeb {
             napi::Error::from_reason(format!("Mutex lock failed: {e}"))
         })?;
 
-        // Résout d'abord les équations de champ
-        let params = TtcParameters::default();
-        let (fields, _) = field_solver::solve_field_equations(&web, params, 0.1, 30);
+        let params = TtcParameters {
+            alpha: alpha.unwrap_or(0.01),
+            beta: beta.unwrap_or(0.3),
+            lambda: lambda.unwrap_or(0.001),
+            gamma: gamma.unwrap_or(0.1),
+            v_gamma: 1.0,
+            v_tension: 0.0,
+        };
+        let lr = learning_rate.unwrap_or(0.05);
+        let iter = iterations.unwrap_or(100) as usize;
 
-        // Récupère la tension du nœud
-        let tension = fields
-            .nodes
-            .get(&uuid)
-            .map(|f| f.tension)
-            .unwrap_or(0.0);
+        let (fields, _) = field_solver::solve_field_equations(&web, params, lr, iter);
 
+        let tension = fields.nodes.get(&uuid).map(|f| f.tension).unwrap_or(0.0);
         Ok(tension)
     }
 
@@ -667,6 +710,24 @@ impl JsWeb {
         );
 
         Ok(residue)
+    }
+
+    /// Évalue le Lagrangien MCW-2 complet sur tout le graphe.
+    ///
+    /// L_W = Σ_i [ −½|∇Γ|² − ½Γ²|∇Φ|² − ½|∇T|² − U(Γ,T) ]
+    ///
+    /// Utile pour :
+    /// - Suivre la convergence (dL_W/dt doit être < 0)
+    /// - Comparer deux configurations (la plus basse est « préférée »)
+    /// - Détecter une instabilité (L_W qui remonte → η trop grand)
+    #[napi]
+    pub fn compute_lagrangian(&self) -> napi::Result<f64> {
+        let web = self.web.lock().map_err(|e| {
+            napi::Error::from_reason(format!("Mutex lock failed: {e}"))
+        })?;
+        let params = TtcParameters::default();
+        let (fields, _) = field_solver::solve_field_equations(&web, params, 0.1, 30);
+        Ok(field_solver::compute_lagrangian(&web, &fields))
     }
 }
 

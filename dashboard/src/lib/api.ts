@@ -1,7 +1,7 @@
 /// @anchor: Client API pour le dashboard KontEx.
 /// Utilise fetch() pour communiquer avec l'API Gateway Express.
 
-const API_BASE = 'http://localhost:3000';
+const API_BASE = 'http://localhost:3001';
 
 export interface KontExNode {
   id: string;
@@ -104,4 +104,37 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  // === TTC Detection & Benchmark ===
+  /** Détecte une hallucination via le pipeline TTC MCW-2 */
+  detect: (content: string) =>
+    apiFetch<{
+      isHallucination: boolean;
+      confidence: number;
+      tension: number;
+      verdict: 'hallucination' | 'coherent' | 'inconclusive';
+      method: string;
+      maxEdgeTension: number;
+      similarNodesCount: number;
+      maxSimilarity: number;
+      contradictingNodeIds: string[];
+      suggestions: string[];
+    }>('/detect', {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+
+  /** Récupère le résultat du benchmark TTC */
+  getBenchmark: () =>
+    apiFetch<{
+      score: number;
+      total: number;
+      percentage: number;
+      tCrit: number;
+      results: Array<{ id: string; label: string; tCoherent: number; tHallucination: number; gap: number; discrim: boolean }>;
+    }>('/benchmark'),
+
+  /** Récupère le Lagrangien MCW-2 */
+  getLagrangian: () =>
+    apiFetch<{ lagrangian: number; note: string }>('/ttc/lagrangian'),
 };

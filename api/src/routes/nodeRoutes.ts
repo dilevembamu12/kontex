@@ -1,7 +1,7 @@
 /// @anchor: Routes pour les nœuds de la toile TTC.
 
 import { Router } from 'express';
-import { createNode, listNodes, getNode, verifyNode, importMarkdown } from '../controllers/nodeController.js';
+import { createNode, listNodes, getNode, verifyNode, importMarkdown, weaveAllNodes, deleteNode } from '../controllers/nodeController.js';
 import { cacheMiddleware } from '../middlewares/cacheMiddleware.js';
 
 const nodeRouter: Router = Router();
@@ -12,6 +12,9 @@ nodeRouter.post('/nodes', createNode);
 // POST /nodes/import — Importer un fichier Markdown en nœuds ancrés
 nodeRouter.post('/nodes/import', importMarkdown);
 
+// POST /nodes/weave — Tisser des liens entre tous les nœuds existants (similarité Jaccard)
+nodeRouter.post('/nodes/weave', weaveAllNodes);
+
 // GET /nodes — Lister tous les nœuds (cache 300s)
 nodeRouter.get('/nodes', cacheMiddleware({ resource: 'nodes', ttlSeconds: 300 }), listNodes);
 
@@ -20,5 +23,8 @@ nodeRouter.get('/nodes/:id', cacheMiddleware({ resource: 'nodes', ttlSeconds: 30
 
 // POST /nodes/:id/verify — Vérifier l'ancrage (pas de cache, lecture seule)
 nodeRouter.post('/nodes/:id/verify', verifyNode);
+
+// DELETE /nodes/:id — Supprimer un nœud et tous ses liens
+nodeRouter.delete('/nodes/:id', deleteNode);
 
 export { nodeRouter };

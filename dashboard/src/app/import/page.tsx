@@ -77,204 +77,96 @@ export default function ImportPage() {
     }
   };
 
-  return (
-    <div className="space-y-6 p-8 max-w-5xl">
-      {/* En-tête */}
-      <div>
-        <h1 className="text-2xl font-bold text-purple-400">📥 Importer du Markdown</h1>
-        <p className="text-gray-500 mt-1">
-          Collez ou déposez un fichier Markdown. Chaque section <code className="text-purple-300">## Titre</code> deviendra un nœud ancré dans la toile TTC.
-        </p>
-      </div>
+  return (<>
+    <div className="d-flex align-items-center justify-content-between mb-4">
+      <div><h4 className="mb-1">📥 Importer du Markdown</h4>
+        <p className="text-muted mb-0">Chaque section <code>## Titre</code> deviendra un nœud ancré dans la toile TTC.</p></div>
+    </div>
 
-      {/* Zone de drop / textarea */}
-      <div
-        className={`relative border-2 border-dashed rounded-xl p-6 transition ${
-          dragOver
-            ? 'border-purple-500 bg-purple-900/20'
-            : 'border-gray-700 bg-gray-900/50 hover:border-gray-600'
-        }`}
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-      >
-        <textarea
-          value={markdown}
-          onChange={(e) => setMarkdown(e.target.value)}
-          placeholder={`# Mon Document
-
-## Introduction
-
-Collez votre markdown ici, ou déposez un fichier .md...
-
-## Règle 1
-
-Les sections avec "Règle" ou "Rule" dans le titre deviennent des nœuds de type **rule**.
-
-## Code API
-
-Les sections avec "Code" ou "API" deviennent des **fact**.
-Les autres sections deviennent de la **documentation**.`}
-          rows={16}
-          className="w-full bg-transparent text-gray-200 font-mono text-sm resize-y outline-none placeholder-gray-600"
-        />
-        <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-800">
-          <div className="flex items-center gap-3">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".md,.markdown"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleFileUpload(file);
-              }}
-              className="hidden"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition"
-            >
-              📁 Choisir un fichier
-            </button>
-            <span className="text-xs text-gray-600">ou déposez un .md ici</span>
+    {/* Zone drop + textarea */}
+    <div className={`card mb-4 ${dragOver ? 'border-purple bg-soft-purple' : ''}`}
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={handleDrop}>
+      <div className="card-body">
+        <textarea value={markdown} onChange={(e) => setMarkdown(e.target.value)}
+          placeholder={`# Mon Document\n\n## Introduction\nCollez votre markdown ici, ou déposez un fichier .md...\n\n## Règle 1\nLes sections avec "Règle" ou "Rule" deviennent des **rule**.\n\n## Code API\nLes sections avec "Code" ou "API" deviennent des **fact**.\nLes autres sections deviennent de la **documentation**.`}
+          rows={14} className="form-control bg-transparent border-0 font-monospace small" style={{resize:'vertical'}} />
+        <div className="d-flex align-items-center justify-content-between mt-3 pt-3 border-top">
+          <div className="d-flex align-items-center gap-2">
+            <input ref={fileInputRef} type="file" accept=".md,.markdown"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); }} className="d-none" />
+            <button onClick={() => fileInputRef.current?.click()} className="btn btn-sm btn-outline-secondary">📁 Choisir un fichier</button>
+            <span className="text-muted small">ou déposez un .md ici</span>
           </div>
-          <span className="text-xs text-gray-600">
-            {markdown.length.toLocaleString()} caractères
-          </span>
+          <span className="badge bg-soft-secondary text-secondary">{markdown.length.toLocaleString()} caractères</span>
         </div>
-      </div>
-
-      {/* Options d'ancrage */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1">
-          <label className="text-sm text-gray-400">URI Source</label>
-          <input
-            type="text"
-            value={sourceUri}
-            onChange={(e) => setSourceUri(e.target.value)}
-            placeholder="file://docs/mon-document.md"
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-gray-200 font-mono text-sm"
-          />
-          <p className="text-xs text-gray-600">L'URI qui servira d'ancre. Auto-détecté si vous chargez un fichier.</p>
-        </div>
-        <div className="space-y-1">
-          <label className="text-sm text-gray-400">Type de source</label>
-          <select
-            value={sourceType}
-            onChange={(e) => setSourceType(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-gray-200"
-          >
-            <option value="specification">📋 Spécification</option>
-            <option value="official_documentation">📚 Documentation officielle</option>
-            <option value="code_repository">📦 Dépôt de code</option>
-            <option value="peer_review">👥 Revue par les pairs</option>
-            <option value="other">📝 Autre</option>
-          </select>
-          <p className="text-xs text-gray-600">Détermine la force d'ancrage (Principe A).</p>
-        </div>
-      </div>
-
-      {/* Bouton d'import */}
-      <button
-        onClick={handleImport}
-        disabled={loading || !markdown.trim()}
-        className="w-full py-3 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 rounded-xl font-semibold text-lg transition"
-      >
-        {loading ? (
-          <span className="flex items-center justify-center gap-2">
-            <span className="animate-spin">⏳</span> Import en cours...
-          </span>
-        ) : (
-          '🪐 Importer dans la Toile TTC'
-        )}
-      </button>
-
-      {/* Erreur */}
-      {error && (
-        <div className="p-4 bg-red-900/30 border border-red-800 rounded-lg text-red-400 text-sm">
-          {error}
-        </div>
-      )}
-
-      {/* Résultat */}
-      {result && (
-        <div className="space-y-4">
-          <div className="p-4 bg-green-900/30 border border-green-800 rounded-lg">
-            <p className="text-green-400 font-semibold text-lg">
-              ✅ {result.imported} / {result.total} sections importées
-            </p>
-            {result.errors && result.errors.length > 0 && (
-              <p className="text-yellow-400 text-sm mt-1">
-                ⚠️ {result.errors.length} erreur(s)
-              </p>
-            )}
-          </div>
-
-          {/* Liste des nœuds créés */}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-800 text-sm text-gray-400 font-medium">
-              Nœuds créés
-            </div>
-            <div className="divide-y divide-gray-800 max-h-80 overflow-y-auto">
-              {result.nodes.map((node) => (
-                <div key={node.id} className="px-4 py-3 flex items-center gap-3 hover:bg-gray-800/50 transition">
-                  <span className="text-lg">{kindIcon(node.kind)}</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-gray-200 text-sm truncate">{node.section}</p>
-                    <p className="text-gray-500 text-xs">{node.kind}</p>
-                  </div>
-                  <code className="text-gray-600 text-xs">{node.id.slice(0, 8)}...</code>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Actions post-import */}
-          <div className="flex gap-3">
-            <button
-              onClick={() => {
-                setMarkdown('');
-                setResult(null);
-                setError(null);
-              }}
-              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm transition"
-            >
-              📝 Nouvel import
-            </button>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(
-                  result.nodes.map((n) => `- [${n.kind}] ${n.section} (${n.id})`).join('\n')
-                );
-              }}
-              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm transition"
-            >
-              📋 Copier la liste
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Guide rapide */}
-      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-5 space-y-2">
-        <h3 className="text-sm font-semibold text-gray-400">📖 Format attendu</h3>
-        <pre className="text-xs text-gray-500 font-mono bg-gray-950/50 p-3 rounded-lg">
-{`## Introduction
-→ Nœud de type "documentation"
-
-## Règle 1
-→ Nœud de type "rule" (contient "Règle" ou "Rule")
-
-## Implémentation API
-→ Nœud de type "fact" (contient "Code" ou "API" ou "Implémentation")
-
-## Conclusion
-→ Nœud de type "documentation"`}
-        </pre>
-        <p className="text-xs text-gray-600 mt-2">
-          Chaque nœud est automatiquement ancré au fichier source (Principe A). Les embeddings Gemini sont générés au prochain backfill.
-        </p>
       </div>
     </div>
-  );
+
+    {/* Options d'ancrage */}
+    <div className="row g-3 mb-4">
+      <div className="col-md-6">
+        <label className="form-label text-muted">URI Source</label>
+        <input type="text" className="form-control font-monospace" value={sourceUri}
+          onChange={(e) => setSourceUri(e.target.value)} placeholder="file://docs/mon-document.md" />
+        <div className="form-text">L&apos;URI qui servira d&apos;ancre. Auto-détecté si vous chargez un fichier.</div>
+      </div>
+      <div className="col-md-6">
+        <label className="form-label text-muted">Type de source</label>
+        <select className="form-select" value={sourceType} onChange={(e) => setSourceType(e.target.value)}>
+          <option value="specification">📋 Spécification</option>
+          <option value="official_documentation">📚 Documentation officielle</option>
+          <option value="code_repository">📦 Dépôt de code</option>
+          <option value="peer_review">👥 Revue par les pairs</option>
+          <option value="other">📝 Autre</option>
+        </select>
+        <div className="form-text">Détermine la force d&apos;ancrage (Principe A).</div>
+      </div>
+    </div>
+
+    {/* Bouton Import */}
+    <button onClick={handleImport} disabled={loading || !markdown.trim()}
+      className="btn btn-purple btn-lg w-100 mb-4">
+      {loading ? <><span className="spinner-border spinner-border-sm me-2"></span>Import en cours...</> : '🪐 Importer dans la Toile TTC'}
+    </button>
+
+    {/* Erreur */}
+    {error && <div className="alert alert-danger">{error}</div>}
+
+    {/* Résultat */}
+    {result && (<>
+      <div className="alert alert-success d-flex align-items-center">
+        <span className="me-2">✅</span> {result.imported} / {result.total} sections importées
+        {result.errors && result.errors.length > 0 && <span className="badge bg-warning ms-2">⚠️ {result.errors.length} erreur(s)</span>}
+      </div>
+
+      <div className="card mb-4">
+        <div className="card-header"><h5 className="card-title mb-0">Nœuds créés</h5></div>
+        <div className="list-group list-group-flush" style={{maxHeight:320, overflowY:'auto'}}>
+          {result.nodes.map((node) => (
+            <div key={node.id} className="list-group-item d-flex align-items-center gap-3">
+              <span className="fs-5">{kindIcon(node.kind)}</span>
+              <div className="flex-fill text-truncate"><span className="d-block small">{node.section}</span><span className="badge bg-soft-secondary text-secondary">{node.kind}</span></div>
+              <code className="text-muted small">{node.id.slice(0,8)}...</code>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="d-flex gap-2 mb-4">
+        <button onClick={() => { setMarkdown(''); setResult(null); setError(null); }} className="btn btn-outline-secondary">📝 Nouvel import</button>
+        <button onClick={() => { navigator.clipboard.writeText(result.nodes.map((n) => `- [${n.kind}] ${n.section} (${n.id})`).join('\n')); }} className="btn btn-outline-secondary">📋 Copier la liste</button>
+      </div>
+    </>)}
+
+    {/* Guide rapide */}
+    <div className="card">
+      <div className="card-body">
+        <h6 className="text-muted mb-3">📖 Format attendu</h6>
+        <pre className="bg-dark text-muted rounded p-3 small mb-2">{`## Introduction\n→ Nœud de type "documentation"\n\n## Règle 1\n→ Nœud de type "rule" (contient "Règle" ou "Rule")\n\n## Implémentation API\n→ Nœud de type "fact" (contient "Code" ou "API")\n\n## Conclusion\n→ Nœud de type "documentation"`}</pre>
+        <p className="text-muted small mb-0">Chaque nœud est automatiquement ancré au fichier source (Principe A). Les embeddings Gemini sont générés au prochain backfill.</p>
+      </div>
+    </div>
+  </>);
 }

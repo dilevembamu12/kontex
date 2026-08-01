@@ -29,7 +29,12 @@ use crate::node::Node;
 use crate::web::ContextWeb;
 
 /// Seuil critique de tension T au-delà duquel une contradiction est déclarée.
-pub const T_CRITICAL: f64 = 0.5;
+/// Seuil de tension critique pour la détection de contradiction.
+/// **Calibré à 0.95** (valeur unifiée avec detectController.ts).
+/// Ce seuil n'est PAS une constante fondamentale du Lagrangien MCW-1 —
+/// il est calibré empiriquement par domaine d'application.
+/// Cf. Réponse co-auteur TTC §3 — T_crit est un paramètre libre.
+pub const T_CRITICAL: f64 = 0.95;
 
 /// Résultat de l'analyse de cohérence entre deux nœuds.
 #[derive(Debug, Clone)]

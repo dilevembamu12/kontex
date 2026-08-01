@@ -10,6 +10,7 @@ export interface LinkRepository {
   findAll(): Promise<StoredLink[]>;
   count(): Promise<number>;
   deleteByNodeIds(sourceId: string, targetId: string, relation?: string): Promise<number>;
+  deleteAllForNode(nodeId: string): Promise<number>;
 }
 
 export class PostgresLinkRepository implements LinkRepository {
@@ -88,6 +89,14 @@ export class PostgresLinkRepository implements LinkRepository {
       : await pool.query('DELETE FROM links WHERE source_id=$1 AND target_id=$2', [sourceId, targetId]);
     return result.rowCount ?? 0;
   }
+
+  async deleteAllForNode(nodeId: string): Promise<number> {
+    const pool = await this.getPool();
+    const result = await pool.query(
+      'DELETE FROM links WHERE source_id=$1 OR target_id=$1', [nodeId]
+    );
+    return result.rowCount ?? 0;
+  }
 }
 
 export class InMemoryLinkRepository implements LinkRepository {
@@ -126,6 +135,21 @@ export class InMemoryLinkRepository implements LinkRepository {
         if (link && link.targetId === targetId) {
           this.links.delete(id); ids.delete(id); count++;
         }
+      }
+    }
+    return count;
+  }
+
+  async deleteAllForNode(nodeId: string): Promise<number> {
+    let count = 0;
+    // Supprime liens sortants
+    const outIds = this.bySource.get(nodeId);
+    if (outIds) { for (const id of [...outIds]) { this.links.delete(id); count++; } this.bySource.delete(nodeId); }
+    // Supprime liens entrants
+    for (const [src, ids] of this.bySource) {
+      for (const id of [...ids]) {
+        const link = this.links.get(id);
+        if (link && link.targetId === nodeId) { this.links.delete(id); ids.delete(id); count++; }
       }
     }
     return count;

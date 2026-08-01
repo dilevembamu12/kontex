@@ -1,14 +1,13 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { StatusBadge } from '@/components/StatusBadge';
 import TtcGraph from '@/components/TtcGraph';
 import { api, type KontExNode, type KontExLink } from '@/lib/api';
 
-const KIND_COLORS: Record<string, string> = {
-  fact: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
-  rule: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
-  code: 'bg-green-500/20 text-green-300 border-green-500/30',
-  documentation: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
+const KIND_BADGES: Record<string, string> = {
+  fact: 'bg-soft-purple text-purple',
+  rule: 'bg-soft-info text-info',
+  code: 'bg-soft-success text-success',
+  documentation: 'bg-soft-warning text-warning',
 };
 
 const RELATION_LABELS: Record<string, string> = {
@@ -27,9 +26,7 @@ export default function WebPage() {
     try {
       const [n, l] = await Promise.all([api.getNodes(), api.getLinks()]);
       setNodes(n.nodes); setLinks(l.links); setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Erreur');
-    }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Erreur'); }
   }
 
   useEffect(() => { load(); const i = setInterval(load, 10000); return () => clearInterval(i); }, []);
@@ -45,60 +42,76 @@ export default function WebPage() {
     finally { setAdding(false); }
   }
 
-  if (error) return <div className="p-8 text-red-400">⚠️ {error}</div>;
+  const contradictions = links.filter(l => l.relation === 'contradicts').length;
 
-  return (
-    <div className="space-y-8">
-      <div><h2 className="text-2xl font-bold text-gray-100">🕸️ Toile TTC</h2><p className="text-gray-500 mt-1">Visualisation et gestion des nœuds et liens</p></div>
+  if (error) return <div className="alert alert-danger">⚠️ {error}</div>;
 
-      <div className="grid grid-cols-3 gap-4">
-        <StatBox label="Nœuds" value={nodes.length} />
-        <StatBox label="Liens" value={links.length} />
-        <StatBox label="Contradictions" value={links.filter(l => l.relation === 'contradicts').length} />
-      </div>
+  return (<>
+    <div className="d-flex align-items-center justify-content-between mb-4">
+      <div><h4 className="mb-1">🕸️ Toile TTC</h4><p className="text-muted mb-0">Visualisation et gestion des nœuds et liens</p></div>
+    </div>
 
-      {/* Graphe D3.js */}
+    {/* Stats */}
+    <div className="row g-3 mb-4">
+      <div className="col-sm-4"><div className="card"><div className="card-body text-center"><p className="text-muted mb-1">Nœuds</p><h3 className="mb-0">{nodes.length}</h3></div></div></div>
+      <div className="col-sm-4"><div className="card"><div className="card-body text-center"><p className="text-muted mb-1">Liens</p><h3 className="mb-0">{links.length}</h3></div></div></div>
+      <div className="col-sm-4"><div className="card"><div className="card-body text-center"><p className="text-muted mb-1">Contradictions</p><h3 className={`mb-0 ${contradictions > 0 ? 'text-danger' : 'text-success'}`}>{contradictions}</h3></div></div></div>
+    </div>
+
+    {/* Graphe D3.js */}
+    <div className="mb-4">
       <TtcGraph nodes={nodes} links={links} />
+    </div>
 
-      {/* Ajout rapide */}
-      <div className="bg-gray-900 rounded-xl border border-gray-800 p-4 flex gap-3">
-        <input type="text" value={newContent} onChange={e => setNewContent(e.target.value)} placeholder="Ajouter un fait (ex: La Terre est ronde)..." className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-purple-500" onKeyDown={e => e.key === 'Enter' && handleAddNode()} />
-        <button onClick={handleAddNode} disabled={adding} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors">{adding ? '...' : 'Ajouter'}</button>
-      </div>
-
-      <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
-        <h3 className="text-lg font-semibold text-gray-100 mb-4">🔵 Nœuds ({nodes.length})</h3>
-        {nodes.length === 0 ? <p className="text-gray-500 text-sm">Aucun nœud. Ajoutez un fait ci-dessus.</p> : (
-          <div className="space-y-2">
-            {nodes.map(node => (
-              <div key={node.id} className="flex items-center gap-3 p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 text-sm">
-                <span className={`px-2 py-0.5 rounded text-xs font-medium border ${KIND_COLORS[node.kind] ?? 'bg-gray-500/20'}`}>{node.kind}</span>
-                <span className="flex-1 text-gray-200 truncate">{node.content}</span>
-                <span className="text-xs text-gray-500">⚓{node.anchors.length} ⚖️{node.weight.toFixed(1)} 🔮{node.ambiguity.toFixed(2)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
-        <h3 className="text-lg font-semibold text-gray-100 mb-4">🔗 Liens ({links.length})</h3>
-        {links.length === 0 ? <p className="text-gray-500 text-sm">Aucun lien.</p> : (
-          <div className="space-y-2">
-            {links.map((link, i) => (
-              <div key={i} className="flex items-center gap-3 p-2 bg-gray-800/50 rounded-lg border border-gray-700/50 text-xs">
-                <span className="font-mono text-purple-400 w-20 truncate">{link.sourceId.slice(0, 8)}</span>
-                <span className="text-gray-500">{RELATION_LABELS[link.relation] ?? link.relation} ({(link.weight * link.relevanceScore).toFixed(2)})</span>
-                <span className="font-mono text-blue-400 w-20 truncate">{link.targetId.slice(0, 8)}</span>
-              </div>
-            ))}
-          </div>
-        )}
+    {/* Ajout rapide */}
+    <div className="card mb-4">
+      <div className="card-body">
+        <div className="input-group">
+          <input type="text" className="form-control" value={newContent} onChange={e => setNewContent(e.target.value)}
+            placeholder="Ajouter un fait (ex: La Terre est ronde)..." onKeyDown={e => e.key === 'Enter' && handleAddNode()} />
+          <button className="btn btn-purple" onClick={handleAddNode} disabled={adding}>
+            {adding ? <span className="spinner-border spinner-border-sm me-1"></span> : null}
+            {adding ? 'Ajout...' : 'Ajouter'}
+          </button>
+        </div>
       </div>
     </div>
-  );
-}
 
-function StatBox({ label, value }: { readonly label: string; readonly value: number }) {
-  return <div className="bg-gray-900 rounded-xl border border-gray-800 p-4 text-center"><p className="text-2xl font-bold text-gray-100">{value}</p><p className="text-xs text-gray-500">{label}</p></div>;
+    {/* Nœuds */}
+    <div className="card mb-4">
+      <div className="card-header d-flex align-items-center justify-content-between">
+        <h5 className="card-title mb-0">🔵 Nœuds ({nodes.length})</h5>
+        <span className="badge bg-soft-primary text-primary">{nodes.length} total</span>
+      </div>
+      <div className="list-group list-group-flush">
+        {nodes.length === 0 ? <div className="list-group-item text-muted text-center py-3">Aucun nœud. Ajoutez un fait dans le champ ci-dessus.</div>
+        : nodes.map(node => (
+          <div key={node.id} className="list-group-item d-flex align-items-center gap-2">
+            <span className={`badge ${KIND_BADGES[node.kind] ?? 'bg-soft-secondary text-secondary'}`} style={{minWidth:70}}>{node.kind}</span>
+            <span className="flex-fill text-truncate small">{node.content}</span>
+            <span className="badge bg-soft-secondary text-secondary">⚓{node.anchors.length}</span>
+            <span className="badge bg-soft-info text-info">⚖️{node.weight.toFixed(1)}</span>
+            <span className="badge bg-soft-warning text-warning">🔮{node.ambiguity.toFixed(2)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    {/* Liens */}
+    <div className="card">
+      <div className="card-header d-flex align-items-center justify-content-between">
+        <h5 className="card-title mb-0">🔗 Liens ({links.length})</h5>
+      </div>
+      <div className="list-group list-group-flush">
+        {links.length === 0 ? <div className="list-group-item text-muted text-center py-3">Aucun lien.</div>
+        : links.map((link, i) => (
+          <div key={i} className="list-group-item d-flex align-items-center gap-2 small">
+            <code className="text-purple text-truncate" style={{width:90}}>{link.sourceId.slice(0,8)}</code>
+            <span className="text-muted">{RELATION_LABELS[link.relation] ?? link.relation} <span className="text-info">({(link.weight * link.relevanceScore).toFixed(2)})</span></span>
+            <code className="text-info text-truncate ms-auto" style={{width:90}}>{link.targetId.slice(0,8)}</code>
+          </div>
+        ))}
+      </div>
+    </div>
+  </>);
 }

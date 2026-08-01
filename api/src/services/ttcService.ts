@@ -145,6 +145,15 @@ export class TtcService {
     return this.nodeRepo.findAll();
   }
 
+  /** Supprime un nœud et tous ses liens. */
+  async deleteNode(id: string): Promise<{ nodeDeleted: boolean; linksDeleted: number }> {
+    const linksDeleted = await this.linkRepo.deleteAllForNode(id);
+    const nodeDeleted = await this.nodeRepo.delete(id);
+    this.outgoingIndex.delete(id);
+    this.incomingIndex.delete(id);
+    return { nodeDeleted, linksDeleted };
+  }
+
   /** Vérifie l'ancrage d'un nœud (Principe A). */
   async verifyAnchoring(nodeId: string): Promise<AnchorVerification> {
     const node = await this.nodeRepo.findById(nodeId);

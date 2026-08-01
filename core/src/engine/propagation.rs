@@ -16,7 +16,9 @@
 ///   w_{ij}^{eff} = w_{ij} · f(Γ_i² + Γ_j² - 2λ(T_i + T_j))
 ///
 /// # Bridage P_max (§6)
-/// P_max = c^5/G ≈ 3.6×10⁵² W (physique) → 243.0 (computational)
+/// P_MAX_COMPUTATIONAL = 243.0 — seuil de saturation heuristique.
+/// Note TTC v1.1 : 3⁵=243 n'a AUCUN lien avec c⁵/G.
+/// Cf. TTC-note-Pmax-rectification.md.
 /// Au-delà, rupture de cohérence → trou noir informationnel (élagage).
 
 use crate::engine::field_solver::{
@@ -29,8 +31,13 @@ use uuid::Uuid;
 use crate::web::ContextWeb;
 
 /// Constante de bridage TTC : densité sémantique maximale avant élagage.
-/// P_max = c^5 / G (version adimensionnée pour le calcul)
+/// Seuil de saturation numérique heuristique (TTC v1.1 §4).
+/// 3⁵ = 243 — coïncidence avec le nombre de champs TTC (3) et l'exposant
+/// du c⁵/G (5). SANS lien physique avec la constante de Planck.
 pub const P_MAX: f64 = 243.0;
+
+/// Alias documenté pour P_MAX (TTC v1.1).
+pub const P_MAX_COMPUTATIONAL: f64 = P_MAX;
 
 /// Résultat de la propagation de contexte depuis un nœud source.
 #[derive(Debug, Clone)]

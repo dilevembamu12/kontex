@@ -2,7 +2,7 @@
 
 import { Router } from 'express';
 import { createLink, listLinks } from '../controllers/linkController.js';
-import { detectHallucination, propagateContext, getStats } from '../controllers/detectController.js';
+import { detectHallucination, propagateContext, getStats, getLagrangian, runBenchmark } from '../controllers/detectController.js';
 import { cacheMiddleware } from '../middlewares/cacheMiddleware.js';
 
 const ttcRouter: Router = Router();
@@ -19,7 +19,13 @@ ttcRouter.post('/detect', detectHallucination);
 // POST /propagate — Propager le contexte (lecture seule, pas de cache)
 ttcRouter.post('/propagate', propagateContext);
 
-// GET /stats — Statistiques globales (cache 120s, invalidation sur mutation)
+// GET /stats — Statistiques globales (cache 120s)
 ttcRouter.get('/stats', cacheMiddleware({ resource: 'stats', ttlSeconds: 120 }), getStats);
+
+// GET /ttc/lagrangian — Lagrangien MCW-2 (pas de cache, calcul physique)
+ttcRouter.get('/ttc/lagrangian', getLagrangian);
+
+// GET /benchmark — Exécute le benchmark TTC 10 paires (pas de cache)
+ttcRouter.get('/benchmark', runBenchmark);
 
 export { ttcRouter };
