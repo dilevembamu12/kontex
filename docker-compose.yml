@@ -85,7 +85,32 @@ services:
       start_period: 5s
 
   # ============================================================
-  # Service 4 : graphiti-db — Moteur TTC (Rust) + Stockage interne
+  # Service 4 : kontex-dashboard — Dashboard Next.js 14 + Bootstrap 5
+  # ============================================================
+  kontex-dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: kontex-dashboard
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://kontex-api:3001}
+    depends_on:
+      - kontex-api
+    restart: unless-stopped
+    networks:
+      - kontex-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ============================================================
+  # Service 5 : graphiti-db — Moteur TTC (Rust) + Stockage interne
   # ============================================================
   graphiti-db:
     # Phase 0 : image placeholder — sera remplacée par l'image Rust du moteur TTC en Phase 1
