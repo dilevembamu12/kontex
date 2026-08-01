@@ -6,3 +6,4 @@ export { nodeRouter } from './nodeRoutes.js';
 export { ttcRouter } from './ttcRoutes.js';
 export { configRouter } from './configRoutes.js';
 export { projectRouter } from './projectRoutes.js';
+export { mcpRouter } from './mcpRoutes.js';

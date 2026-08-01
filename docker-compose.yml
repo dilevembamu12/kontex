@@ -110,7 +110,59 @@ services:
       start_period: 20s
 
   # ============================================================
-  # Service 5 : graphiti-db — Moteur TTC (Rust) + Stockage interne
+  # Service 5 : graphiti — Moteur de mémoire temporelle pour l'IA
+  # ============================================================
+  graphiti:
+    image: ghcr.io/getzep/graphiti:latest
+    container_name: kontex-graphiti
+    ports:
+      - "${GRAPHITI_PORT:-8003}:8003"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      NEO4J_URI: bolt://kontex-neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-kontexgraphiti}
+      PORT: 8003
+    depends_on:
+      kontex-neo4j:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - kontex-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8003/healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ============================================================
+  # Service 6 : kontex-neo4j — Base graphe pour Graphiti
+  # ============================================================
+  kontex-neo4j:
+    image: neo4j:5-community
+    container_name: kontex-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-kontexgraphiti}
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "${NEO4J_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    volumes:
+      - kontex-neo4j-data:/data
+      - kontex-neo4j-logs:/logs
+    restart: unless-stopped
+    networks:
+      - kontex-network
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD:-kontexgraphiti}", "RETURN 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # ============================================================
+  # Service 7 : graphiti-db — Placeholder (conservé pour rétrocompatibilité)
   # ============================================================
   graphiti-db:
     # Phase 0 : image placeholder — sera remplacée par l'image Rust du moteur TTC en Phase 1
@@ -139,6 +191,10 @@ volumes:
     name: kontex-postgres-data
   kontex-redis-data:
     name: kontex-redis-data
+  kontex-neo4j-data:
+    name: kontex-neo4j-data
+  kontex-neo4j-logs:
+    name: kontex-neo4j-logs
 
 # ============================================================
 # Réseau interne KontEx
