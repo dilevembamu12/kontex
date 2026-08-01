@@ -4,6 +4,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { ttcService } from '../services/ttcService.js';
 import { cacheService } from '../services/cacheService.js';
+import { parseSourceFile, type ParsedFile } from '../services/codeParser.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -135,15 +136,21 @@ export async function createProject(request: Request, response: Response, next: 
         // Créer un nœud par fichier pertinent (limité à 50)
         for (const file of relevantFiles.slice(0, 50)) {
           try {
-            const content = fs.readFileSync(file, 'utf-8').slice(0, 1500);
+            const rawContent = fs.readFileSync(file, 'utf-8');
             const relPath = path.relative(tmpDir, file);
+            const parsed = parseSourceFile(relPath, rawContent);
+
+            // Construire un résumé intelligent du fichier
+            const summary = buildFileSummary(parsed);
+            if (!summary) continue;
+
             const fileNode = await ttcService.addNode({
               kind: 'code',
-              content: `[Fichier: ${relPath}]\n${content}`,
+              content: `[Fichier: ${relPath}] ${summary}`,
               weight: 0.7,
               ambiguity: 0.3,
               anchors: [{ uri: `file://${repoUrl}/${relPath}`, sourceType: 'code_repository' as const }],
-              metadata: { projectId, repoUrl, filePath: relPath, type: 'ingested-file' },
+              metadata: { projectId, repoUrl, filePath: relPath, type: 'ingested-file', language: parsed.language },
             });
             createdIds.push(fileNode.id);
             nodesCreated++;
@@ -156,6 +163,67 @@ export async function createProject(request: Request, response: Response, next: 
               relevanceScore: 0.5,
             });
             linksCreated++;
+
+            // Créer des nœuds pour les classes et fonctions importantes
+            for (const cls of parsed.classes) {
+              const clsNode = await ttcService.addNode({
+                kind: 'code',
+                content: `[Classe: ${cls.name}] ${relPath}${cls.extends ? ` extends ${cls.extends}` : ''}. Méthodes: ${cls.methods.slice(0, 5).join(', ')}.`,
+                weight: 0.8,
+                ambiguity: 0.2,
+                anchors: [{ uri: `file://${repoUrl}/${relPath}#class-${cls.name}`, sourceType: 'code_repository' as const }],
+                metadata: { projectId, filePath: relPath, className: cls.name, type: 'class' },
+              });
+              createdIds.push(clsNode.id); nodesCreated++;
+              await ttcService.addLink({ sourceId: clsNode.id, targetId: fileNode.id, relation: 'refines', weight: 0.8, relevanceScore: 0.8 });
+              linksCreated++;
+            }
+
+            for (const func of parsed.functions.slice(0, 10)) {
+              if (func.name.length < 3) continue;
+              const funcNode = await ttcService.addNode({
+                kind: 'code',
+                content: `[Fonction: ${func.name}] ${relPath}. ${func.exported ? 'Exportée.' : ''} ${func.async ? 'Async.' : ''}`,
+                weight: 0.7,
+                ambiguity: 0.3,
+                anchors: [{ uri: `file://${repoUrl}/${relPath}#func-${func.name}`, sourceType: 'code_repository' as const }],
+                metadata: { projectId, filePath: relPath, functionName: func.name, type: 'function' },
+              });
+              createdIds.push(funcNode.id); nodesCreated++;
+              await ttcService.addLink({ sourceId: funcNode.id, targetId: fileNode.id, relation: 'refines', weight: 0.6, relevanceScore: 0.6 });
+              linksCreated++;
+            }
+
+            // Créer des nœuds pour les modèles Laravel
+            for (const model of parsed.models) {
+              const relText = model.relationships.map(r => `${r.type}→${r.target}`).join(', ');
+              const modelNode = await ttcService.addNode({
+                kind: 'code',
+                content: `[Modèle Eloquent: ${model.name}] Table: ${model.table || '?'}. Relations: ${relText || 'aucune'}. Fillable: ${model.fillable.slice(0, 5).join(', ')}.`,
+                weight: 0.85,
+                ambiguity: 0.15,
+                anchors: [{ uri: `file://${repoUrl}/${relPath}#model-${model.name}`, sourceType: 'code_repository' as const }],
+                metadata: { projectId, filePath: relPath, modelName: model.name, type: 'eloquent-model' },
+              });
+              createdIds.push(modelNode.id); nodesCreated++;
+              await ttcService.addLink({ sourceId: modelNode.id, targetId: fileNode.id, relation: 'refines', weight: 0.9, relevanceScore: 0.9 });
+              linksCreated++;
+            }
+
+            // Créer des nœuds pour les routes Laravel
+            for (const route of parsed.routes.slice(0, 20)) {
+              const routeNode = await ttcService.addNode({
+                kind: 'code',
+                content: `[Route: ${route.method} ${route.path}] → ${route.handler}`,
+                weight: 0.75,
+                ambiguity: 0.25,
+                anchors: [{ uri: `file://${repoUrl}/${relPath}#route`, sourceType: 'code_repository' as const }],
+                metadata: { projectId, filePath: relPath, routeMethod: route.method, routePath: route.path, type: 'route' },
+              });
+              createdIds.push(routeNode.id); nodesCreated++;
+              await ttcService.addLink({ sourceId: routeNode.id, targetId: fileNode.id, relation: 'refines', weight: 0.7, relevanceScore: 0.7 });
+              linksCreated++;
+            }
           } catch { /* skip unreadable files */ }
         }
         fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -258,6 +326,17 @@ export async function exportCursorRules(request: Request, response: Response, ne
   } catch (error: unknown) {
     next(error);
   }
+}
+
+/** Construit un résumé intelligent d'un fichier parsé. */
+function buildFileSummary(parsed: ParsedFile): string {
+  const parts: string[] = [];
+  if (parsed.classes.length > 0) parts.push(`${parsed.classes.length} classe(s): ${parsed.classes.map(c => c.name).join(', ')}`);
+  if (parsed.functions.length > 0) parts.push(`${parsed.functions.length} fonction(s): ${parsed.functions.slice(0, 5).map(f => f.name).join(', ')}`);
+  if (parsed.models.length > 0) parts.push(`Modèle(s): ${parsed.models.map(m => m.name).join(', ')}`);
+  if (parsed.routes.length > 0) parts.push(`${parsed.routes.length} route(s)`);
+  if (parsed.imports.length > 0) parts.push(`${parsed.imports.length} dépendance(s)`);
+  return parts.length > 0 ? parts.join(' | ') : `${parsed.language}: ${parsed.path}`;
 }
 
 /** Récupère récursivement tous les fichiers d'un dossier. */
