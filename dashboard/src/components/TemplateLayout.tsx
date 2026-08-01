@@ -9,6 +9,7 @@ const NAVIGATION = [
     title: 'Main Menu',
     items: [
       { href: '/', label: '📊 Dashboard', icon: 'ti ti-layout-dashboard' },
+      { href: '/projects', label: '🚀 Projets', icon: 'ti ti-stack' },
       { href: '/web', label: '🕸️ Toile TTC', icon: 'ti ti-topology-star' },
       { href: '/detect', label: '🔍 Détection', icon: 'ti ti-search' },
       { href: '/import', label: '📥 Import Markdown', icon: 'ti ti-file-import' },

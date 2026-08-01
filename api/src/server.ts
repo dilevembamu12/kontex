@@ -13,7 +13,7 @@ import {
   apiKeyAuth,
   rateLimiter,
 } from './middlewares/index.js';
-import { healthRouter, nodeRouter, ttcRouter, configRouter } from './routes/index.js';
+import { healthRouter, nodeRouter, ttcRouter, configRouter, projectRouter } from './routes/index.js';
 import { initEmbeddingGenerator } from './services/embeddingService.js';
 
 /**
@@ -60,6 +60,9 @@ function buildExpressApplication(): Express {
 
   // Routes de configuration
   application.use(configRouter);
+
+  // Routes de projets — Vibe Coding Wizard
+  application.use(projectRouter);
 
   // --- Middleware d'erreur (toujours en dernier) ---
   application.use(globalErrorHandler);
